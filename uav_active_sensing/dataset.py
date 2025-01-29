@@ -6,7 +6,7 @@ import requests
 import zipfile
 from torchvision import datasets, transforms
 
-from uav_active_sensing.config import PROCESSED_DATA_DIR, RAW_DATA_DIR
+from uav_active_sensing.config import PROCESSED_DATA_DIR
 
 app = typer.Typer()
 
