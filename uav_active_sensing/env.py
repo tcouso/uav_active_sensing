@@ -1,7 +1,18 @@
+# TODO: Make env compatible with tensors from any type of image (error in COCO):
+# url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+# image = Image.open(requests.get(url, stream=True).raw)
+
+# TODO: Document that it expects a float tensor (ensure it with a transform perhaps)
+
+# TODO: Make it accept 4D tensors for batch dimension. Make it also output 4D tensors (required for correct model functioning)
+
+# TODO: Implement random position masking strategies based on 1) Pure masking (as MAE) and 2) masking and blurring for implementing benchmarks
+
 import random as rd
 import torch
 import torch.nn.functional as F
 from typing import Tuple, List, Optional
+
 
 class ImageEnv:
     """
@@ -19,9 +30,9 @@ class ImageEnv:
     """
 
     def __init__(
-        self, 
-        image: torch.Tensor, 
-        img_FoV_ratio: int, 
+        self,
+        image: torch.Tensor,
+        img_FoV_ratio: int,
         device: Optional[str] = "cpu"
     ) -> None:
         """
@@ -49,7 +60,7 @@ class ImageEnv:
         self._min_kernel_size = 1
         self._max_kernel_size = self.img_height - self.sensor_height + 1
         self._max_kernel_size = (
-            self._max_kernel_size if self._max_kernel_size % 2 == 1 
+            self._max_kernel_size if self._max_kernel_size % 2 == 1
             else self._max_kernel_size - 1
         )
         self.__kernel_size = self._min_kernel_size
@@ -136,7 +147,7 @@ class ImageEnv:
         """
         max_kernel_size_from_sensor_pos = min(self.img_height, self.img_width) - max(self._sensor_pos)
         max_kernel_size_from_sensor_pos = (
-            max_kernel_size_from_sensor_pos if max_kernel_size_from_sensor_pos % 2 == 1 
+            max_kernel_size_from_sensor_pos if max_kernel_size_from_sensor_pos % 2 == 1
             else max_kernel_size_from_sensor_pos - 1
         )
         self.__kernel_size = max(min(kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size)
@@ -217,3 +228,13 @@ class ImageEnv:
         self._kernel_size += 2 * dz
 
         self._observe()
+
+    def random_walk(self, steps: int):  # Temporal debug method
+        for _ in range(steps):
+            dx = rd.choice([-10, 0, 10])  # Move left, stay, or move right
+            dy = rd.choice([-10, 0, 10])  # Move up, stay, or move down
+            dz = rd.choice([-1, 0, 1])  # Zoom in, stay, or zoom out
+
+            self.move(dx, dy, dz)
+
+        return self.sampled_img
