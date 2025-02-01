@@ -1,28 +1,36 @@
+import random as rd
 import torch
 import torch.nn.functional as F
-from typing import Tuple
-
+from typing import Tuple, List, Optional
 
 class ImageEnv:
+    """
+    A class to simulate a sensor moving over an image, with adjustable position and blurring.
+
+    Attributes:
+        device (str): The device (e.g., 'cpu' or 'cuda') where the image and computations reside.
+        img (torch.Tensor): The input image tensor.
+        img_height (int): The height of the image.
+        img_width (int): The width of the image.
+        img_sensor_ratio (int): The ratio of the image size to the sensor size.
+        sensor_height (int): The height of the sensor.
+        sensor_width (int): The width of the sensor.
+        sampled_img (torch.Tensor): The image tensor with sampled regions.
+    """
+
     def __init__(
-        self, image: torch.Tensor,
-        img_FoV_ratio: int,
-        min_altitude: int,
-        max_altitude: int,
-        device: str = "cpu"
+        self, 
+        image: torch.Tensor, 
+        img_FoV_ratio: int, 
+        device: Optional[str] = "cpu"
     ) -> None:
         """
-        Initializes the ImageEnv class with the given image and sensor parameters.
+        Initializes the ImageEnv with an image and sensor parameters.
 
         Args:
-            image (torch.Tensor): The input image tensor with shape (C, H, W), where
-                                  C is the number of channels, H is the height, and
-                                  W is the width.
-            img_FoV_ratio (int): The ratio that defines the sensor's Field of View (FoV).
-            min_altitude (int): The minimum altitude of the sensor.
-            max_altitude (int): The maximum altitude of the sensor.
-            device (str, optional): The device to run the computation on ('cpu' or 'cuda').
-                                    Defaults to 'cpu'.
+            image (torch.Tensor): The input image tensor of shape (C, H, W).
+            img_FoV_ratio (int): The ratio of the image size to the sensor size.
+            device (Optional[str]): The device to use ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -31,50 +39,51 @@ class ImageEnv:
         self.img_height, self.img_width = image.shape[1:]
 
         self.img_sensor_ratio = img_FoV_ratio
-        self.min_altitude = min_altitude
-        self.max_altitude = max_altitude
 
         self.sensor_height = self.img_height // self.img_sensor_ratio
         self.sensor_width = self.img_width // self.img_sensor_ratio
 
-        self._sensor_pos = [0, 0, self.min_altitude]
-        self.sensor_min_pos = [0, 0, self.min_altitude]
+        self._sensor_min_pos = [0, 0]
+        self.__sensor_pos = [rd.randint(0, self.img_height,), rd.randint(0, self.img_width,)]
 
-        self.max_zoom_level = 1
-        self.min_zoom_level = max(
-            self.img_height // self.sensor_height,
-            self.img_width // self.sensor_width)
+        self._min_kernel_size = 1
+        self._max_kernel_size = self.img_height - self.sensor_height + 1
+        self._max_kernel_size = (
+            self._max_kernel_size if self._max_kernel_size % 2 == 1 
+            else self._max_kernel_size - 1
+        )
+        self.__kernel_size = self._min_kernel_size
 
+        self._sampled_kernel_size_mask = torch.full_like(
+            self.img, fill_value=self._max_kernel_size, dtype=torch.int32
+        )
         self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
-        self.sample_img_altitude_mask = torch.full_like(self.img, fill_value=self.max_altitude, dtype=torch.int32)
 
     @property
-    def fov_bbox(self) -> Tuple[int, int, int, int]:
+    def fov_bbox(self) -> List[int]:
         """
-        Calculates the bounding box of the sensor's Field of View (FoV) based on the sensor position and zoom level.
+        Computes the bounding box of the field of view (FoV) based on the current sensor position and kernel size.
 
         Returns:
-            Tuple[int, int, int, int]: A tuple (top, bottom, left, right) representing
-                                        the bounding box of the FoV.
+            List[int]: A list of coordinates [top, bottom, left, right] defining the FoV bounding box.
         """
-        zoomed_size_height = int(self.sensor_height * self.zoom_level)
-        zoomed_size_width = int(self.sensor_width * self.zoom_level)
+        fov_height = int(self.sensor_height + self._kernel_size - 1)
+        fov_width = int(self.sensor_width + self._kernel_size - 1)
 
-        top = max(0, self.sensor_pos[0])
-        left = max(0, self.sensor_pos[1])
-        bottom = min(self.img_height, self.sensor_pos[0] + zoomed_size_height)
-        right = min(self.img_width, self.sensor_pos[1] + zoomed_size_width)
+        top = self._sensor_pos[0]
+        left = self._sensor_pos[1]
+        bottom = self._sensor_pos[0] + fov_height
+        right = self._sensor_pos[1] + fov_width
 
         return [top, bottom, left, right]
 
     @property
-    def sensor_max_pos(self) -> Tuple[int, int, int]:
+    def sensor_max_pos(self) -> Tuple[int, int]:
         """
-        Calculates the maximum possible position of the sensor, ensuring the sensor stays within bounds.
+        Computes the maximum valid position for the sensor based on the current FoV.
 
         Returns:
-            Tuple[int, int, int]: A tuple (max_height, max_width, max_altitude) representing
-                                   the maximum sensor position along each axis.
+            Tuple[int, int]: The maximum (y, x) position the sensor can occupy.
         """
         top, bottom, left, right = self.fov_bbox
 
@@ -83,47 +92,54 @@ class ImageEnv:
         sensor_max_height = self.img_height - fov_height
         sensor_max_width = self.img_width - fov_width
 
-        return (sensor_max_height, sensor_max_width, self.max_altitude)
+        return (sensor_max_height, sensor_max_width)
 
     @property
-    def sensor_pos(self) -> Tuple[int, int, int]:
+    def _sensor_pos(self) -> Tuple[int, int]:
         """
-        Gets the current position of the sensor.
+        Gets the current sensor position.
 
         Returns:
-            Tuple[int, int, int]: A tuple (x, y, z) representing the sensor's position in space.
+            Tuple[int, int]: The current (y, x) position of the sensor.
         """
-        return tuple(self._sensor_pos)
+        return tuple(self.__sensor_pos)
 
-    @sensor_pos.setter
-    def sensor_pos(self, new_position: Tuple[int, int, int]) -> None:
+    @_sensor_pos.setter
+    def _sensor_pos(self, new_position: Tuple[int, int]) -> None:
         """
-        Sets the position of the sensor, ensuring that the new position is within the allowed bounds.
+        Sets the sensor position, ensuring it stays within valid bounds.
 
         Args:
-            new_position (Tuple[int, int, int]): A tuple (x, y, z) representing the new position of the sensor.
+            new_position (Tuple[int, int]): The new (y, x) position for the sensor.
         """
-        x, y, z = new_position
-
-        # z update first, in order to constrain x and y
-        self._sensor_pos[2] = max(min(z, self.sensor_max_pos[2]), self.sensor_min_pos[2])
-
-        # x and y update based on the new max positions
-        self._sensor_pos[0] = max(min(x, self.sensor_max_pos[0]), self.sensor_min_pos[0])
-        self._sensor_pos[1] = max(min(y, self.sensor_max_pos[1]), self.sensor_min_pos[1])
+        x, y = new_position
+        self.__sensor_pos[0] = max(min(x, self.sensor_max_pos[0]), self._sensor_min_pos[0])
+        self.__sensor_pos[1] = max(min(y, self.sensor_max_pos[1]), self._sensor_min_pos[1])
 
     @property
-    def zoom_level(self) -> float:
+    def _kernel_size(self) -> int:
         """
-        Calculates the current zoom level based on the sensor's altitude.
+        Gets the current kernel size.
 
         Returns:
-            float: The zoom level of the sensor based on its altitude.
+            int: The current kernel size.
         """
-        m = (self.min_zoom_level - self.max_zoom_level) / (self.max_altitude - self.min_altitude)
-        b = self.max_zoom_level - m * self.min_altitude
+        return self.__kernel_size
 
-        return m * self._sensor_pos[2] + b
+    @_kernel_size.setter
+    def _kernel_size(self, kernel_size: int) -> None:
+        """
+        Sets the kernel size, ensuring it stays within valid bounds.
+
+        Args:
+            kernel_size (int): The new kernel size.
+        """
+        max_kernel_size_from_sensor_pos = min(self.img_height, self.img_width) - max(self._sensor_pos)
+        max_kernel_size_from_sensor_pos = (
+            max_kernel_size_from_sensor_pos if max_kernel_size_from_sensor_pos % 2 == 1 
+            else max_kernel_size_from_sensor_pos - 1
+        )
+        self.__kernel_size = max(min(kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size)
 
     def _apply_blur(self, window: torch.Tensor) -> torch.Tensor:
         """
@@ -131,74 +147,73 @@ class ImageEnv:
 
         Args:
             window (torch.Tensor): A tensor of shape (C, H, W), where C is the number of channels,
-                                   H is the height, and W is the width of the image.
+                                H is the height, and W is the width of the image.
 
         Returns:
             torch.Tensor: A blurred tensor with the same shape as the input window.
         """
-        kernel_size = int(self.zoom_level)
-        kernel_size = kernel_size if kernel_size % 2 == 1 else kernel_size + 1
-        padding = kernel_size // 2
-        window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')  # Apply reflection padding to avoid margin artifacts
-        blurred = F.avg_pool2d(window_padded.unsqueeze(0), kernel_size=kernel_size, stride=1, padding=0).squeeze(0)
+        padding = self._kernel_size // 2
+        window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')
+        blurred = F.avg_pool2d(window_padded.unsqueeze(0), kernel_size=self._kernel_size, stride=1, padding=0).squeeze(0)
+
+        assert blurred.shape == window.shape
 
         return blurred
 
-    def _apply_higher_zoom_filter(self, obs: torch.Tensor) -> torch.Tensor:
+    def _filter_high_blur_obs(self, obs: torch.Tensor) -> torch.Tensor:
         """
-        Updates the observed image based on the current sensor position and altitude.
+        Filters observations to ensure higher blur levels do not overwrite lower ones.
 
         Args:
-            obs (torch.Tensor): The current observation tensor of shape (C, H, W).
+            obs (torch.Tensor): The observed tensor.
 
         Returns:
-            torch.Tensor: The updated observation tensor.
+            torch.Tensor: The filtered observation tensor.
         """
         top, bottom, left, right = self.fov_bbox
 
-        previous_altitude_mask = self.sample_img_altitude_mask[:, top:bottom, left:right]
-        current_altitude_mask = torch.full_like(previous_altitude_mask, fill_value=self.sensor_pos[2])
+        prev_mask = self._sampled_kernel_size_mask[:, top:bottom, left:right]
+        curr_mask = torch.full_like(prev_mask, fill_value=self._kernel_size)
 
-        # Altitude mask updating
-        altitudes_to_update = current_altitude_mask < previous_altitude_mask
-        self.sample_img_altitude_mask[:, top:bottom, left:right][altitudes_to_update] = current_altitude_mask[altitudes_to_update]
+        # Blur mask update
+        updated_mask = curr_mask < prev_mask
+        self._sampled_kernel_size_mask[:, top:bottom, left:right][updated_mask] = curr_mask[updated_mask]
 
-        # Observation updating
+        # Observation update
         prev_obs = self.sampled_img[:, top:bottom, left:right]
-        obs_to_update = current_altitude_mask > previous_altitude_mask
+        obs_to_update = curr_mask > prev_mask
         obs[obs_to_update] = prev_obs[obs_to_update]
 
         return obs
 
     def _observe(self) -> None:
         """
-        Captures an observation from the image based on the current sensor position and zoom level.
-
-        This method applies a blur if the zoom level is above the maximum zoom level and updates
-        the sampled image with the new observation.
+        Updates the sampled image based on the current sensor position and kernel size.
         """
         top, bottom, left, right = self.fov_bbox
         obs = self.img[:, top:bottom, left:right].clone()
 
-        if self.zoom_level > self.max_zoom_level:
+        if self._kernel_size > self._min_kernel_size:
             obs = self._apply_blur(obs)
             obs = obs.squeeze(0)
 
-        obs = self._apply_higher_zoom_filter(obs)
+        obs = self._filter_high_blur_obs(obs)
+
         self.sampled_img[:, top:bottom, left:right] = obs
 
     def move(self, dx: int, dy: int, dz: int) -> None:
         """
-        Moves the sensor by the specified amount along each axis and updates the observation.
+        Moves the sensor and updates the observation.
 
         Args:
-            dx (int): The amount to move along the x-axis.
-            dy (int): The amount to move along the y-axis.
-            dz (int): The amount to move along the z-axis (altitude).
+            dx (int): The change in the x-direction.
+            dy (int): The change in the y-direction.
+            dz (int): The change in the kernel size.
         """
-        self.sensor_pos = (
-            self.sensor_pos[0] + dy,
-            self.sensor_pos[1] + dx,
-            self.sensor_pos[2] + dz
+        self._sensor_pos = (
+            self._sensor_pos[0] + dy,
+            self._sensor_pos[1] + dx,
         )
+        self._kernel_size += 2 * dz
+
         self._observe()
