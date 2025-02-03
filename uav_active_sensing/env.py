@@ -1,12 +1,20 @@
+# TODO: Make sensor size (max definition) a parameter
+
 # TODO: Make env compatible with tensors from any type of image (error in COCO):
 # url = "http://images.cocodataset.org/val2017/000000039769.jpg"
 # image = Image.open(requests.get(url, stream=True).raw)
 
 # TODO: Document that it expects a float tensor (ensure it with a transform perhaps)
 
+# TODO: Implement random position masking strategies based on 1) Pure masking (as MAE) and 2) masking and blurring for implementing benchmarks
+# 1.- Keep the original random masking method
+# 2.- Use blurring and masking noise
+# 4.- Use active masking method with learned policy
+# 1 and 4 are enough for now
+
+
 # TODO: Make it accept 4D tensors for batch dimension. Make it also output 4D tensors (required for correct model functioning)
 
-# TODO: Implement random position masking strategies based on 1) Pure masking (as MAE) and 2) masking and blurring for implementing benchmarks
 
 import random as rd
 import torch
@@ -229,11 +237,11 @@ class ImageEnv:
 
         self._observe()
 
-    def random_walk(self, steps: int):  # Temporal debug method
+    def random_walk(self, steps: int, planar_step_size:int=10, altitude_step_size:int=1):  # Temporal debug method
         for _ in range(steps):
-            dx = rd.choice([-10, 0, 10])  # Move left, stay, or move right
-            dy = rd.choice([-10, 0, 10])  # Move up, stay, or move down
-            dz = rd.choice([-1, 0, 1])  # Zoom in, stay, or zoom out
+            dx = rd.choice([-planar_step_size, 0, planar_step_size])  # Move left, stay, or move right
+            dy = rd.choice([-planar_step_size, 0, planar_step_size])  # Move up, stay, or move down
+            dz = rd.choice([-altitude_step_size, 0, altitude_step_size])  # Zoom in, stay, or zoom out
 
             self.move(dx, dy, dz)
 
