@@ -1,3 +1,10 @@
+import random as rd
+from typing import Union, Optional, Tuple, List
+
+import torch
+import torch.nn.functional as F
+from transformers.models.vit_mae.modeling_vit_mae import ViTMAEForPreTraining, ViTMAEForPreTrainingOutput
+
 # TODO: Make sensor size (max definition) a parameter
 
 # TODO: Make env compatible with tensors from any type of image (error in COCO):
@@ -14,12 +21,6 @@
 
 
 # TODO: Make it accept 4D tensors for batch dimension. Make it also output 4D tensors (required for correct model functioning)
-
-
-import random as rd
-import torch
-import torch.nn.functional as F
-from typing import Tuple, List, Optional
 
 
 class ImageEnv:
@@ -245,4 +246,85 @@ class ImageEnv:
 
             self.move(dx, dy, dz)
 
-        return self.sampled_img
+class ActViTMAEForPreTraining(ViTMAEForPreTraining):
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.forward = self.forward_with_two_input_tensors
+        self.vit.embeddings.random_masking = self.nan_masking
+
+    def forward_with_two_input_tensors(
+        self,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        sampled_pixel_values: Optional[torch.FloatTensor] = None,
+        noise: Optional[torch.FloatTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
+    ) -> Union[Tuple, ViTMAEForPreTrainingOutput]:
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.vit(
+            sampled_pixel_values,  # Sampled pixel values are given to the encoder
+            noise=noise,
+            head_mask=head_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            interpolate_pos_encoding=interpolate_pos_encoding,
+        )
+
+        latent = outputs.last_hidden_state
+        ids_restore = outputs.ids_restore
+        mask = outputs.mask
+
+        decoder_outputs = self.decoder(latent, ids_restore, interpolate_pos_encoding=interpolate_pos_encoding)
+        logits = decoder_outputs.logits  # shape (batch_size, num_patches, patch_size*patch_size*num_channels)
+
+        # Loss is computed with respect to full image pixel values
+        loss = self.forward_loss(pixel_values, logits, mask, interpolate_pos_encoding=interpolate_pos_encoding)
+
+        if not return_dict:
+            output = (logits, mask, ids_restore) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return ViTMAEForPreTrainingOutput(
+            loss=loss,
+            logits=logits,
+            mask=mask,
+            ids_restore=ids_restore,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+    def nan_masking(self, sequence, noise=None):
+        _ = noise  # Not used
+        batch_size, seq_length, dim = sequence.shape
+
+        # Identify patches with NaN values
+        nan_mask = torch.isnan(sequence).any(dim=-1)  # Shape: (batch_size, seq_length), True if any NaN in patch
+
+        # Get indices of patches to keep
+        ids_shuffle = torch.argsort(nan_mask.float(), dim=1)  # NaNs will be last, non-NaNs first
+        ids_restore = torch.argsort(ids_shuffle, dim=1).to(sequence.device)  # Restore original order
+
+        # Keep only non-NaN patches
+        len_keep = (~nan_mask).sum(dim=1, keepdim=True)  # Number of non-NaN patches per batch
+        ids_keep = ids_shuffle[:, :len_keep.min()]  # Select valid (non-NaN) patches
+
+        sequence_unmasked = torch.gather(sequence, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, dim))
+
+        # Create a binary mask: 0 for kept patches, 1 for masked patches
+        mask = nan_mask.float()
+        mask = torch.gather(mask, dim=1, index=ids_restore)  # Align mask with original order
+
+        return sequence_unmasked, mask, ids_restore
+
+
+
+    
+
+    
