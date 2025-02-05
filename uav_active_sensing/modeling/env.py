@@ -4,23 +4,6 @@ from typing import Optional, Tuple, List
 import torch
 import torch.nn.functional as F
 
-# TODO: Make sensor size (max definition) a parameter
-
-# TODO: Make env compatible with tensors from any type of image (error in COCO):
-# url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-# image = Image.open(requests.get(url, stream=True).raw)
-
-# TODO: Document that it expects a float tensor (ensure it with a transform perhaps)
-
-# TODO: Implement random position masking strategies based on 1) Pure masking (as MAE) and 2) masking and blurring for implementing benchmarks
-# 1.- Keep the original random masking method
-# 2.- Use blurring and masking noise
-# 4.- Use active masking method with learned policy
-# 1 and 4 are enough for now
-
-
-# TODO: Make it accept 4D tensors for batch dimension. Make it also output 4D tensors (required for correct model functioning)
-
 
 class ImageEnv:
     """
@@ -40,7 +23,8 @@ class ImageEnv:
     def __init__(
         self,
         image: torch.Tensor,
-        img_FoV_ratio: int,
+        patch_size: int = 16,
+        img_sensor_ratio: Optional[int] = None,
         device: Optional[str] = "cpu"
     ) -> None:
         """
@@ -48,19 +32,21 @@ class ImageEnv:
 
         Args:
             image (torch.Tensor): The input image tensor of shape (C, H, W).
-            img_FoV_ratio (int): The ratio of the image size to the sensor size.
+            img_sensor_ratio (int): The ratio of the image size to the sensor size.
             device (Optional[str]): The device to use ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.device = device
         self.img = image.to(self.device)
-        self.img_height, self.img_width = image.shape[1:]
+        self.img_height, self.img_width = image.shape[2:]
 
-        self.img_sensor_ratio = img_FoV_ratio
-
-        self.sensor_height = self.img_height // self.img_sensor_ratio
-        self.sensor_width = self.img_width // self.img_sensor_ratio
+        if img_sensor_ratio:
+            self.sensor_height = self.img_height // img_sensor_ratio
+            self.sensor_width = self.img_width // img_sensor_ratio
+        else:
+            self.sensor_height = patch_size
+            self.sensor_width = patch_size
 
         self._sensor_min_pos = [0, 0]
         self.__sensor_pos = [rd.randint(0, self.img_height,), rd.randint(0, self.img_width,)]
@@ -173,7 +159,7 @@ class ImageEnv:
         """
         padding = self._kernel_size // 2
         window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')
-        blurred = F.avg_pool2d(window_padded.unsqueeze(0), kernel_size=self._kernel_size, stride=1, padding=0).squeeze(0)
+        blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
 
         assert blurred.shape == window.shape
 
@@ -191,15 +177,15 @@ class ImageEnv:
         """
         top, bottom, left, right = self.fov_bbox
 
-        prev_mask = self._sampled_kernel_size_mask[:, top:bottom, left:right]
+        prev_mask = self._sampled_kernel_size_mask[:, :, top:bottom, left:right]
         curr_mask = torch.full_like(prev_mask, fill_value=self._kernel_size)
 
         # Blur mask update
         updated_mask = curr_mask < prev_mask
-        self._sampled_kernel_size_mask[:, top:bottom, left:right][updated_mask] = curr_mask[updated_mask]
+        self._sampled_kernel_size_mask[:, :, top:bottom, left:right][updated_mask] = curr_mask[updated_mask]
 
         # Observation update
-        prev_obs = self.sampled_img[:, top:bottom, left:right]
+        prev_obs = self.sampled_img[:, :, top:bottom, left:right]
         obs_to_update = curr_mask > prev_mask
         obs[obs_to_update] = prev_obs[obs_to_update]
 
@@ -210,15 +196,15 @@ class ImageEnv:
         Updates the sampled image based on the current sensor position and kernel size.
         """
         top, bottom, left, right = self.fov_bbox
-        obs = self.img[:, top:bottom, left:right].clone()
+        obs = self.img[:, :, top:bottom, left:right].clone()
 
         if self._kernel_size > self._min_kernel_size:
             obs = self._apply_blur(obs)
-            obs = obs.squeeze(0)
+            obs = obs
 
         obs = self._filter_high_blur_obs(obs)
 
-        self.sampled_img[:, top:bottom, left:right] = obs
+        self.sampled_img[:, :, top:bottom, left:right] = obs
 
     def move(self, dx: int, dy: int, dz: int) -> None:
         """
@@ -237,10 +223,20 @@ class ImageEnv:
 
         self._observe()
 
-    def random_walk(self, steps: int, planar_step_size:int=10, altitude_step_size:int=1):  # Temporal debug method
+    def random_walk(self, steps: int, planar_step_size: int = 10, altitude_step_size: int = 1):  # Temporal debug method
         for _ in range(steps):
             dx = rd.choice([-planar_step_size, 0, planar_step_size])  # Move left, stay, or move right
             dy = rd.choice([-planar_step_size, 0, planar_step_size])  # Move up, stay, or move down
             dz = rd.choice([-altitude_step_size, 0, altitude_step_size])  # Zoom in, stay, or zoom out
 
             self.move(dx, dy, dz)
+
+
+# MAE wrapper for reward computation
+class RewardFunction:
+    def __init__(self, model):
+        self.model = model  # Store the model instance
+
+    def __call__(self, state):
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        return self.model(state_tensor).item()  # Compute reward
