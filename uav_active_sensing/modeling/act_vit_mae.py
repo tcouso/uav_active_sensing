@@ -926,7 +926,7 @@ class ActViTMAEDecoder(nn.Module):
         output_attentions=False,
         output_hidden_states=False,
         return_dict=True,
-        interpolate_pos_encoding: bool = False,
+        interpolate_pos_encoding=False,
     ):
         # embed tokens
         x = self.decoder_embed(hidden_states)
