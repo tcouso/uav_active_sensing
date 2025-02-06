@@ -115,6 +115,11 @@ class ActViTMAEConfig(PretrainedConfig):
         decoder_intermediate_size=2048,
         # mask_ratio=0.75,
         norm_pix_loss=False,
+        v_max_x=10,
+        v_max_y=10,
+        v_max_z=2,
+        max_steps=100,
+        interval_reward_assignment=5,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -138,6 +143,11 @@ class ActViTMAEConfig(PretrainedConfig):
         self.decoder_intermediate_size = decoder_intermediate_size
         # self.mask_ratio = mask_ratio
         self.norm_pix_loss = norm_pix_loss
+        self.v_max_x = v_max_x
+        self.v_max_y = v_max_y
+        self.v_max_z = v_max_z
+        self.max_steps = max_steps
+        self.interval_reward_assignment = interval_reward_assignment
 
 
 __all__ = ["ActViTMAEConfig"]
