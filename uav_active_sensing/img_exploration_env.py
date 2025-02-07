@@ -8,9 +8,14 @@ import torch.nn.functional as F
 import gymnasium as gym
 from gymnasium import spaces
 
+from ray.rllib.env.env_context import EnvContext
+from ray.tune.registry import register_env
 
-from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEConfig
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
+
+
+def env_creator(env_config: EnvContext):
+    return ImageExplorationEnv(env_config)
 
 
 def make_kernel_size_odd(n: int) -> int:
@@ -31,6 +36,8 @@ class RewardFunction:
 
         return reward
 
+# TODO: Implement support for batch size greater than 1
+
 
 class ImageExplorationEnv(gym.Env):
     """
@@ -47,14 +54,7 @@ class ImageExplorationEnv(gym.Env):
         sampled_img (torch.Tensor): The image tensor with sampled regions.
     """
 
-    def __init__(
-        self,
-        img: torch.Tensor,
-        reward_function: RewardFunction,
-        img_sensor_ratio: Optional[int] = None,
-        device: Optional[str] = "cpu",
-        config: ActViTMAEConfig = None,
-    ) -> None:
+    def __init__(self, env_config: dict) -> None:
         """
         Initializes the ImageEnv with an image and sensor parameters.
 
@@ -63,21 +63,23 @@ class ImageExplorationEnv(gym.Env):
             img_sensor_ratio (int): The ratio of the image size to the sensor size.
             device (Optional[str]): The device to use ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
-        if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.device = device
-        self.img = img.to(self.device)
-        self.img_height, self.img_width = img.shape[2:]
 
-        if img_sensor_ratio:
-            self.sensor_height = self.img_height // img_sensor_ratio
-            self.sensor_width = self.img_width // img_sensor_ratio
+        self.device = env_config["device"]
+        self._dataloader = env_config["dataloader"]
+        self._iterator = iter(self._dataloader)
+
+        self.img = next(self._iterator).to(self.device)
+        self.img_height, self.img_width = self.img.shape[2:]
+
+        if "img_sensor_ratio" in env_config:
+            self.sensor_height = self.img_height // env_config["img_sensor_ratio"]
+            self.sensor_width = self.img_width // env_config["img_sensor_ratio"]
         else:
-            self.sensor_height = config.patch_size
-            self.sensor_width = config.patch_size
+            self.sensor_height = env_config["patch_size"]
+            self.sensor_width = env_config["patch_size"]
 
         self._sensor_min_pos = [0, 0]
-        self.__sensor_pos = [rd.randint(0, self.img_height,), rd.randint(0, self.img_width,)]
+        self.__sensor_pos = [rd.randint(0, self.img_height), rd.randint(0, self.img_width)]
 
         self._min_kernel_size = 1
         self._max_kernel_size = make_kernel_size_odd(self.img_height - self.sensor_height + 1)
@@ -86,7 +88,15 @@ class ImageExplorationEnv(gym.Env):
         self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
         self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
 
+        self._iterator = iter(self._dataloader)  # Reset iterator for epoch start
+
         # Gymnasium interface
+        self._max_steps = env_config["max_steps"]
+        self._step_count = 0
+
+        self.reward_function = env_config["reward_function"]
+        self.interval_reward_assignment = env_config["interval_reward_assignment"]
+
         self.observation_space = spaces.Box(
             low=0,
             high=255,
@@ -95,16 +105,10 @@ class ImageExplorationEnv(gym.Env):
         )
 
         self.action_space = spaces.Box(
-            low=np.array([-config.v_max_x, -config.v_max_y, -config.v_max_z], dtype=np.float32),
-            high=np.array([config.v_max_x, config.v_max_y, config.v_max_z], dtype=np.float32),
+            low=np.array([-env_config["v_max_x"], -env_config["v_max_y"], -env_config["v_max_z"]], dtype=np.float32),
+            high=np.array([env_config["v_max_x"], env_config["v_max_y"], env_config["v_max_z"]], dtype=np.float32),
             dtype=np.int32
         )
-        self._max_steps = config.max_steps
-        self._step_count = 0
-
-        self.reward_function = reward_function
-        self.interval_reward_assignment = config.interval_reward_assignment
-        
 
     def _get_obs(self):
 
@@ -118,18 +122,25 @@ class ImageExplorationEnv(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
 
-        x = rd.randint(0, self.img_height)
-        y = rd.randint(0, self.img_width)
+        try:
+            self.img = next(self._iterator)
 
-        self._sensor_pos = (x, y)
+            x = rd.randint(0, self.img_height)
+            y = rd.randint(0, self.img_width)
 
-        z = make_kernel_size_odd(rd.randint(self._min_kernel_size, self._max_kernel_size))
-        self._kernel_size = z
+            self._sensor_pos = (x, y)
 
-        # Clear episode variables
-        self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
-        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
-        self._step_count = 0
+            z = make_kernel_size_odd(rd.randint(self._min_kernel_size, self._max_kernel_size))
+            self._kernel_size = z
+
+            # Clear episode variables
+            self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
+            self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
+            self._step_count = 0
+
+        except StopIteration:
+            self._dataloader = iter(self._dataloader)
+            self.img = next(self._iterator)
 
         observation = self._get_obs()
         info = self._get_info()
@@ -154,7 +165,12 @@ class ImageExplorationEnv(gym.Env):
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info
-    
+
+    @property
+    def dataloader(self):
+
+        return self._dataloader
+
     @property
     def step_count(self):
 
@@ -255,7 +271,7 @@ class ImageExplorationEnv(gym.Env):
         window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')
         blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
 
-        assert blurred.shape == window.shape  # error here
+        assert blurred.shape == window.shape
 
         return blurred
 
@@ -317,16 +333,5 @@ class ImageExplorationEnv(gym.Env):
 
         self._update_sampled_img()
 
-    def random_walk(self, steps: int, planar_step_size: int = 10, altitude_step_size: int = 1):  # Temporal debug method
-        for _ in range(steps):
-            dx = rd.choice([-planar_step_size, 0, planar_step_size])  # Move left, stay, or move right
-            dy = rd.choice([-planar_step_size, 0, planar_step_size])  # Move up, stay, or move down
-            dz = rd.choice([-altitude_step_size, 0, altitude_step_size])  # Zoom in, stay, or zoom out
 
-            self.move(dx, dy, dz)
-
-
-# gym.register(
-#     id="ImgExploreEnv-v0",
-#     entry_point=f"{__name__}:ImageExplorationEnv",
-# )
+register_env("ImgExploreEnv-v0", env_creator)
