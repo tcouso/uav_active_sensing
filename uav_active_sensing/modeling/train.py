@@ -3,7 +3,7 @@ import typer
 from uav_active_sensing.config import PROCESSED_DATA_DIR
 
 from uav_active_sensing.pytorch_dataloaders import TinyImageNetDataset
-from uav_active_sensing.img_exploration_env import ImageExplorationEnv, RewardFunction
+from uav_active_sensing.modeling.img_exploration_env import ImageExplorationEnv, RewardFunction
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
 
 
