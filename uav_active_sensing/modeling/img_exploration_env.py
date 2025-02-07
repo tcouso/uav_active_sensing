@@ -38,7 +38,6 @@ class RewardFunction:
 
 # TODO: Implement support for batch size greater than 1
 
-
 class ImageExplorationEnv(gym.Env):
     """
     A class to simulate a sensor moving over an image, with adjustable position and blurring.
@@ -111,8 +110,9 @@ class ImageExplorationEnv(gym.Env):
         )
 
     def _get_obs(self):
+        
+        return torch.nan_to_num(self.sampled_img, nan=0.0)
 
-        return self.sampled_img
 
     def _get_info(self):
         info = {}
@@ -251,7 +251,7 @@ class ImageExplorationEnv(gym.Env):
         Args:
             kernel_size (int): The new kernel size.
         """
-        max_kernel_size_from_sensor_pos = make_kernel_size_odd(min(self.img_height, self.img_width) - max(self._sensor_pos))  # Current position restricts kernel size
+        max_kernel_size_from_sensor_pos = make_kernel_size_odd(min(self.img_height, self.img_width) - max(self._sensor_pos)) # Current position restricts kernel size
         new_kernel_size = max(min(new_kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size)
 
         self.__kernel_size = make_kernel_size_odd(new_kernel_size)
