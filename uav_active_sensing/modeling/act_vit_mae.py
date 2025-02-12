@@ -1135,7 +1135,6 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
         sampled_pixel_values: Optional[torch.FloatTensor] = None,
-        # noise: Optional[torch.FloatTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
