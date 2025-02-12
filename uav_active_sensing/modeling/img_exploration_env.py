@@ -1,5 +1,6 @@
 import random as rd
 from typing import Optional, Tuple, List
+from dataclasses import dataclass
 
 import numpy as np
 import torch
@@ -8,6 +9,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
+
 
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0
@@ -24,22 +26,40 @@ class RewardFunction:
         outputs = self.model(img, sampled_img)
         loss = outputs.loss
         reward = 1 / (1 + loss)
+        reward = reward.detach().numpy()
 
         return reward
 
+
+@dataclass
+class EnvConfig:
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    patch_size: int = 16
+    max_steps: int = 20
+    interval_reward_assignment: int = 10
+    v_max_x: int = 10
+    v_max_y: int = 10
+    v_max_z: int = 0
+
+    # Set during execution
+    img_sensor_ratio: float = None
+    img: torch.Tensor = None
+    reward_function: 'RewardFunction' = None
+
+
 class ImageExplorationEnv(gym.Env):
 
-    def __init__(self, env_config: dict) -> None:
-        self.device = env_config["device"]
-        self.img = env_config["img"]
+    def __init__(self, env_config: EnvConfig) -> None:
+        self.device = env_config.device
+        self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
 
-        if "img_sensor_ratio" in env_config:
-            self.sensor_height = self.img_height // env_config["img_sensor_ratio"]
-            self.sensor_width = self.img_width // env_config["img_sensor_ratio"]
+        if env_config.img_sensor_ratio is not None:
+            self.sensor_height = self.img_height // env_config.img_sensor_ratio
+            self.sensor_width = self.img_width // env_config.img_sensor_ratio
         else:
-            self.sensor_height = env_config["patch_size"]
-            self.sensor_width = env_config["patch_size"]
+            self.sensor_height = env_config.patch_size
+            self.sensor_width = env_config.patch_size
 
         self._sensor_min_pos = [0, 0]
         self.__sensor_pos = [rd.randint(0, self.img_height), rd.randint(0, self.img_width)]
@@ -52,30 +72,28 @@ class ImageExplorationEnv(gym.Env):
         self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
 
         # Gymnasium interface
-        self._max_steps = env_config["max_steps"]
+        self._max_steps = env_config.max_steps
         self._step_count = 0
 
-        self.reward_function = env_config["reward_function"]
-        self.interval_reward_assignment = env_config["interval_reward_assignment"]
+        self.reward_function = env_config.reward_function
+        self.interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Box(
             low=0,
             high=255,
-            shape=(self.sensor_height, self.sensor_width, 3),
+            shape=(self.img_height, self.img_width, 3),
             dtype="uint8",
         )
 
         self.action_space = spaces.Box(
-            low=np.array([-env_config["v_max_x"], -env_config["v_max_y"], -env_config["v_max_z"]], dtype=np.float32),
-            high=np.array([env_config["v_max_x"], env_config["v_max_y"], env_config["v_max_z"]], dtype=np.float32),
+            low=np.array([-env_config.v_max_x, -env_config.v_max_y, -env_config.v_max_z], dtype=np.float32),
+            high=np.array([env_config.v_max_x, env_config.v_max_y, env_config.v_max_z], dtype=np.float32),
             dtype=np.int32
         )
 
-
     def _get_obs(self):
-        
-        return torch.nan_to_num(self.sampled_img, nan=0.0)
 
+        return torch.nan_to_num(self.sampled_img, nan=0.0)
 
     def _get_info(self):
         info = {}
@@ -84,25 +102,25 @@ class ImageExplorationEnv(gym.Env):
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
 
-            super().reset(seed=seed)
+        super().reset(seed=seed)
 
-            x = rd.randint(0, self.img_height)
-            y = rd.randint(0, self.img_width)
+        x = rd.randint(0, self.img_height)
+        y = rd.randint(0, self.img_width)
 
-            self._sensor_pos = (x, y)
+        self._sensor_pos = (x, y)
 
-            z = make_kernel_size_odd(rd.randint(self._min_kernel_size, self._max_kernel_size))
-            self._kernel_size = z
+        z = make_kernel_size_odd(rd.randint(self._min_kernel_size, self._max_kernel_size))
+        self._kernel_size = z
 
-            # Clear episode variables
-            self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
-            self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
-            self._step_count = 0
+        # Clear episode variables
+        self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
+        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
+        self._step_count = 0
 
-            observation = self._get_obs()
-            info = self._get_info()
+        observation = self._get_obs()
+        info = self._get_info()
 
-            return observation, info
+        return observation, info
 
     def step(self, action: Tuple[float, float, float]):
 
@@ -208,7 +226,7 @@ class ImageExplorationEnv(gym.Env):
         Args:
             kernel_size (int): The new kernel size.
         """
-        max_kernel_size_from_sensor_pos = make_kernel_size_odd(min(self.img_height, self.img_width) - max(self._sensor_pos)) # Current position restricts kernel size
+        max_kernel_size_from_sensor_pos = make_kernel_size_odd(min(self.img_height, self.img_width) - max(self._sensor_pos))  # Current position restricts kernel size
         new_kernel_size = max(min(new_kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size)
 
         self.__kernel_size = make_kernel_size_odd(new_kernel_size)
@@ -224,7 +242,7 @@ class ImageExplorationEnv(gym.Env):
         Returns:
             torch.Tensor: A blurred tensor with the same shape as the input window.
         """
-        padding = self._kernel_size // 2
+        padding = int(self._kernel_size // 2)
         window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')
         blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
 
