@@ -1,7 +1,7 @@
 # coding=utf-8
 # Copyright 2022 Facebook AI and The HuggingFace Inc. team. All rights reserved.
 #
-# Modifications made by Tomás Couso Coddou, 2024.
+# Modifications made by Tomás Couso Coddou, 2025.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1135,7 +1135,6 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
         sampled_pixel_values: Optional[torch.FloatTensor] = None,
-        # noise: Optional[torch.FloatTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
