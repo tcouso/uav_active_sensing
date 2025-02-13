@@ -9,8 +9,12 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
-from uav_active_sensing.config import DEVICE
+from uav_active_sensing.config import DEVICE, set_seed
 
+set_seed()
+
+# TODO: Give seed parameter for deterministic behaviour
+# TODO: Make obs space consisten with actual obs space
 
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0

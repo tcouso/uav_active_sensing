@@ -4,6 +4,7 @@ import os
 import random
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
@@ -18,14 +19,14 @@ from uav_active_sensing.modeling.img_exploration_env import (
     RewardFunction,
     ImageExplorationEnvConfig,
 )
-from uav_active_sensing.config import REPORTS_DIR, MODELS_DIR, DEVICE, IMG_BATCH_SIZE
+from uav_active_sensing.config import REPORTS_DIR, MODELS_DIR, DEVICE, IMG_BATCH_SIZE, SEED
 
 
 @dataclass
 class PPOConfig:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
     """the name of this experiment"""
-    seed: int = 1
+    seed: int = SEED
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
@@ -334,7 +335,8 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if ppo_config.save_model:
-        model_path = f"{MODELS_DIR}/runs/{run_name}/{ppo_config.exp_name}.cleanrl_model"
+        model_path = Path(MODELS_DIR) / "runs" / run_name / f"{ppo_config.exp_name}.cleanrl_model"
+        model_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
 

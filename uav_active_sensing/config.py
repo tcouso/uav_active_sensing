@@ -3,7 +3,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from loguru import logger
 import torch
-
+import random
+import numpy as np
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -22,6 +23,20 @@ MODELS_DIR = PROJ_ROOT / "models"
 
 REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
+
+
+# Random seed setter function
+SEED = 42
+def set_seed(seed: int = SEED):
+    """Set the random seed for reproducibility across multiple libraries."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # If using multiple GPUs
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 
 # Select device
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
