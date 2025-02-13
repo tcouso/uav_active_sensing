@@ -13,8 +13,10 @@ import torch.optim as optim
 from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-from uav_active_sensing.modeling.img_exploration_env import ImageExplorationEnv, RewardFunction, EnvConfig
-from uav_active_sensing.config import REPORTS_DIR
+from uav_active_sensing.modeling.img_exploration_env import ImageExplorationEnv, RewardFunction, ImageExplorationEnvConfig
+from uav_active_sensing.config import REPORTS_DIR, MODELS_DIR
+
+
 @dataclass
 class PPOConfig:
     exp_name: str = os.path.basename(__file__)[: -len(".py")]
@@ -30,17 +32,16 @@ class PPOConfig:
     save_model: bool = False
     """whether to save model into the `runs/{run_name}` folder"""
 
-
     # Algorithm specific arguments
     env_id: str = "ImageExploration-v0"
     """the id of the environment"""
-    total_timesteps: int = 500
+    total_timesteps: int = 10 * 128
     """total timesteps of the experiments"""
     learning_rate: float = 3e-4
     """the learning rate of the optimizer"""
     num_envs: int = 1
     """the number of parallel game environments"""
-    num_steps: int = 2048
+    num_steps: int = 128
     """the number of steps to run in each environment per policy rollout"""
     anneal_lr: bool = True
     """Toggle learning rate annealing for policy and value networks"""
@@ -78,11 +79,11 @@ class PPOConfig:
 
 def make_env(img: torch.Tensor, reward_function: RewardFunction, gamma: float):
     def thunk():
-        config = EnvConfig(
+        config = ImageExplorationEnvConfig(
             img=img,
             reward_function=reward_function
-            )
-        env = ImageExplorationEnv(config) # TODO: make with seed
+        )
+        env = ImageExplorationEnv(config)  # TODO: make with seed
         env = gym.wrappers.FlattenObservation(env)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
@@ -133,7 +134,6 @@ class Agent(nn.Module):
         return action, probs.log_prob(action).sum(1), probs.entropy().sum(1), self.critic(x)
 
 
-
 def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
     ppo_config = PPOConfig()
     ppo_config.batch_size = int(ppo_config.num_envs * ppo_config.num_steps)
@@ -178,8 +178,10 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
     next_obs = torch.Tensor(next_obs).to(device)
     next_done = torch.zeros(ppo_config.num_envs).to(device)
 
+    print("Num iters: ", ppo_config.num_iterations)
+
     for iteration in range(1, ppo_config.num_iterations + 1):
-        print(iteration) # TODO: We are not getting here
+        print(f"Curr iteration {iteration}")
         # Annealing the rate if instructed to do so.
         if ppo_config.anneal_lr:
             frac = 1.0 - (iteration - 1.0) / ppo_config.num_iterations
@@ -187,6 +189,7 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
             optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, ppo_config.num_steps):
+            # print(f"Curr step {step}")
             global_step += ppo_config.num_envs
             obs[step] = next_obs
             dones[step] = next_done
@@ -307,9 +310,9 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
     if ppo_config.save_model:
-        model_path = f"{REPORTS_DIR}/runs/{run_name}/{ppo_config.exp_name}.cleanrl_model"
+        model_path = f"{MODELS_DIR}/runs/{run_name}/{ppo_config.exp_name}.cleanrl_model"
         torch.save(agent.state_dict(), model_path)
         print(f"model saved to {model_path}")
-        
+
     envs.close()
     writer.close()

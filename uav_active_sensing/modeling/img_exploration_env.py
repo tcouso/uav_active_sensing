@@ -23,7 +23,8 @@ class RewardFunction:
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
 
-        outputs = self.model(img, sampled_img)
+        with torch.no_grad():
+            outputs = self.model(img, sampled_img)
         loss = outputs.loss
         reward = 1 / (1 + loss)
         reward = reward.detach().numpy()
@@ -32,7 +33,7 @@ class RewardFunction:
 
 
 @dataclass
-class EnvConfig:
+class ImageExplorationEnvConfig:
     device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     patch_size: int = 16
     max_steps: int = 20
@@ -44,12 +45,12 @@ class EnvConfig:
     # Set during execution
     img_sensor_ratio: float = None
     img: torch.Tensor = None
-    reward_function: 'RewardFunction' = None
+    reward_function: RewardFunction = None
 
 
 class ImageExplorationEnv(gym.Env):
 
-    def __init__(self, env_config: EnvConfig) -> None:
+    def __init__(self, env_config: ImageExplorationEnvConfig) -> None:
         self.device = env_config.device
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
@@ -135,7 +136,7 @@ class ImageExplorationEnv(gym.Env):
             reward = torch.tensor(0)
 
         self._step_count += 1
-        terminated = (self._step_count == self._max_steps)
+        terminated = (self._step_count == self._max_steps) # TODO: termination condition as sampling coverage (comparison with MAE methods)
         truncated = False
         info = self._get_info()
 
@@ -305,5 +306,4 @@ class ImageExplorationEnv(gym.Env):
             self._sensor_pos[1] + dx,
         )
         self._kernel_size += dz
-
         self._update_sampled_img()
