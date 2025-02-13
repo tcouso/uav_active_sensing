@@ -9,6 +9,7 @@ from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.ppo import train_ppo
 
 
+
 app = typer.Typer()
 
 
@@ -26,6 +27,6 @@ def main():
     for img_batch in tiny_imagenet_train_loader:
         train_ppo(img_batch, reward_function)
 
-
+        
 if __name__ == "__main__":
     app()
