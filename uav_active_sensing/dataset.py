@@ -23,7 +23,7 @@ def download_and_extract_tiny_imagenet(target_dir: Path):
         logger.info("Downloading Tiny ImageNet dataset...")
         response = requests.get(TINY_IMAGENET_URL, stream=True)
         with open(zip_path, "wb") as f:
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = int(response.headers.get("content-length", 0))
             with tqdm(total=total_size, unit="B", unit_scale=True) as pbar:
                 for data in response.iter_content(chunk_size=1024):
                     f.write(data)
@@ -45,17 +45,15 @@ def main():
 
     # Download and process CIFAR-10
     cifar10_processed_dir = PROCESSED_DATA_DIR / "cifar10"
-    datasets.CIFAR10(
-        root=cifar10_processed_dir, train=True, download=True
-    )
-    datasets.CIFAR10(
-        root=cifar10_processed_dir, train=False, download=True
-    )
+    datasets.CIFAR10(root=cifar10_processed_dir, train=True, download=True)
+    datasets.CIFAR10(root=cifar10_processed_dir, train=False, download=True)
     logger.info(f"CIFAR-10 datasets have been downloaded and stored in {cifar10_processed_dir}")
 
     # Download and extract Tiny ImageNet
     download_and_extract_tiny_imagenet(TINY_IMAGENET_PROCESSED_DIR)
-    logger.info(f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_PROCESSED_DIR}")
+    logger.info(
+        f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_PROCESSED_DIR}"
+    )
 
 
 if __name__ == "__main__":

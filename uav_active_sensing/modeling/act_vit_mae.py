@@ -217,7 +217,9 @@ class ActViTMAEEmbeddings(nn.Module):
     def initialize_weights(self):
         # initialize (and freeze) position embeddings by sin-cos embedding
         pos_embed = get_2d_sincos_pos_embed(
-            self.position_embeddings.shape[-1], int(self.patch_embeddings.num_patches**0.5), add_cls_token=True
+            self.position_embeddings.shape[-1],
+            int(self.patch_embeddings.num_patches**0.5),
+            add_cls_token=True,
         )
         self.position_embeddings.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
@@ -229,7 +231,9 @@ class ActViTMAEEmbeddings(nn.Module):
         torch.nn.init.normal_(self.cls_token, std=self.config.initializer_range)
 
     # Copied from transformers.models.vit.modeling_vit.ViTEmbeddings.interpolate_pos_encoding
-    def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    def interpolate_pos_encoding(
+        self, embeddings: torch.Tensor, height: int, width: int
+    ) -> torch.Tensor:
         """
         This method allows to interpolate the pre-trained position encodings, to be able to use the model on higher resolution
         images. This method is also adapted to support torch.jit tracing.
@@ -269,15 +273,14 @@ class ActViTMAEEmbeddings(nn.Module):
 
         return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
 
-
     def nan_masking(self, sequence):
         """
         Masks patches that contain NaN values in a deterministic way.
-        
+
         Args:
             sequence (`torch.FloatTensor` of shape `(batch_size, sequence_length, dim)`) :
                 Input sequence of patches.
-        
+
         Returns:
             - `sequence_unmasked` (`torch.FloatTensor` of shape `(batch_size, num_unmasked_patches, dim)`) :
             Sequence with NaN-containing patches removed.
@@ -287,34 +290,37 @@ class ActViTMAEEmbeddings(nn.Module):
             Indices to restore the original order of patches.
         """
         batch_size, seq_length, dim = sequence.shape
-        
+
         # Identify NaN patches
         nan_mask = torch.isnan(sequence).any(dim=-1)  # Shape: (batch_size, seq_length)
-        
+
         # Sorting indices: NaN patches go last, non-NaN patches come first
         ids_shuffle = torch.argsort(nan_mask.int(), dim=1)  # NaNs get sorted to the end
         ids_restore = torch.argsort(ids_shuffle, dim=1)
-        
+
         # Determine how many patches to keep (non-NaN patches)
         num_unmasked = (~nan_mask).sum(dim=1)  # Shape: (batch_size,)
-        
+
         # Get indices of non-NaN patches
-        ids_keep = ids_shuffle[:, :num_unmasked.max()]
-        
+        ids_keep = ids_shuffle[:, : num_unmasked.max()]
+
         # Gather non-NaN patches
-        sequence_unmasked = torch.gather(sequence, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, dim))
-        
+        sequence_unmasked = torch.gather(
+            sequence, dim=1, index=ids_keep.unsqueeze(-1).expand(-1, -1, dim)
+        )
+
         # Generate binary mask (0 = keep, 1 = mask NaN patches)
         mask = torch.ones((batch_size, seq_length), device=sequence.device)
-        mask[:, :num_unmasked.max()] = 0  # First part is unmasked, rest are masked
+        mask[:, : num_unmasked.max()] = 0  # First part is unmasked, rest are masked
         mask = torch.gather(mask, dim=1, index=ids_restore)  # Restore original order
-        
-        return sequence_unmasked, mask, ids_restore
 
+        return sequence_unmasked, mask, ids_restore
 
     def forward(self, pixel_values, interpolate_pos_encoding: bool = False):
         batch_size, num_channels, height, width = pixel_values.shape
-        embeddings = self.patch_embeddings(pixel_values, interpolate_pos_encoding=interpolate_pos_encoding)
+        embeddings = self.patch_embeddings(
+            pixel_values, interpolate_pos_encoding=interpolate_pos_encoding
+        )
         if interpolate_pos_encoding:
             position_embeddings = self.interpolate_pos_encoding(embeddings, height, width)
         else:
@@ -345,15 +351,25 @@ class ActViTMAEPatchEmbeddings(nn.Module):
         super().__init__()
         image_size, patch_size = config.image_size, config.patch_size
         num_channels, hidden_size = config.num_channels, config.hidden_size
-        image_size = image_size if isinstance(image_size, collections.abc.Iterable) else (image_size, image_size)
-        patch_size = patch_size if isinstance(patch_size, collections.abc.Iterable) else (patch_size, patch_size)
+        image_size = (
+            image_size
+            if isinstance(image_size, collections.abc.Iterable)
+            else (image_size, image_size)
+        )
+        patch_size = (
+            patch_size
+            if isinstance(patch_size, collections.abc.Iterable)
+            else (patch_size, patch_size)
+        )
         num_patches = (image_size[1] // patch_size[1]) * (image_size[0] // patch_size[0])
         self.image_size = image_size
         self.patch_size = patch_size
         self.num_channels = num_channels
         self.num_patches = num_patches
 
-        self.projection = nn.Conv2d(num_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
+        self.projection = nn.Conv2d(
+            num_channels, hidden_size, kernel_size=patch_size, stride=patch_size
+        )
 
     def forward(self, pixel_values, interpolate_pos_encoding: bool = False):
         batch_size, num_channels, height, width = pixel_values.shape
@@ -362,7 +378,9 @@ class ActViTMAEPatchEmbeddings(nn.Module):
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
             )
 
-        if not interpolate_pos_encoding and (height != self.image_size[0] or width != self.image_size[1]):
+        if not interpolate_pos_encoding and (
+            height != self.image_size[0] or width != self.image_size[1]
+        ):
             raise ValueError(
                 f"Input image size ({height}*{width}) doesn't match model ({self.image_size[0]}*{self.image_size[1]})."
             )
@@ -374,7 +392,9 @@ class ActViTMAEPatchEmbeddings(nn.Module):
 class ActViTMAESelfAttention(nn.Module):
     def __init__(self, config: ActViTMAEConfig) -> None:
         super().__init__()
-        if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
+        if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
+            config, "embedding_size"
+        ):
             raise ValueError(
                 f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
                 f"heads {config.num_attention_heads}."
@@ -396,7 +416,10 @@ class ActViTMAESelfAttention(nn.Module):
         return x.permute(0, 2, 1, 3)
 
     def forward(
-        self, hidden_states, head_mask: Optional[torch.Tensor] = None, output_attentions: bool = False
+        self,
+        hidden_states,
+        head_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
         mixed_query_layer = self.query(hidden_states)
 
@@ -510,7 +533,10 @@ class ActViTMAEAttention(nn.Module):
         if len(heads) == 0:
             return
         heads, index = find_pruneable_heads_and_indices(
-            heads, self.attention.num_attention_heads, self.attention.attention_head_size, self.pruned_heads
+            heads,
+            self.attention.num_attention_heads,
+            self.attention.attention_head_size,
+            self.pruned_heads,
         )
 
         # Prune linear layers
@@ -521,7 +547,9 @@ class ActViTMAEAttention(nn.Module):
 
         # Update hyper params and store pruned heads
         self.attention.num_attention_heads = self.attention.num_attention_heads - len(heads)
-        self.attention.all_head_size = self.attention.attention_head_size * self.attention.num_attention_heads
+        self.attention.all_head_size = (
+            self.attention.attention_head_size * self.attention.num_attention_heads
+        )
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def forward(
@@ -605,7 +633,9 @@ class ActViTMAELayer(nn.Module):
         output_attentions: bool = False,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
         self_attention_outputs = self.attention(
-            self.layernorm_before(hidden_states),  # in ActViTMAE, layernorm is applied before self-attention
+            self.layernorm_before(
+                hidden_states
+            ),  # in ActViTMAE, layernorm is applied before self-attention
             head_mask,
             output_attentions=output_attentions,
         )
@@ -632,7 +662,9 @@ class ActViTMAEEncoder(nn.Module):
     def __init__(self, config: ActViTMAEConfig) -> None:
         super().__init__()
         self.config = config
-        self.layer = nn.ModuleList([ActViTMAELayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList(
+            [ActViTMAELayer(config) for _ in range(config.num_hidden_layers)]
+        )
         self.gradient_checkpointing = False
 
     def forward(
@@ -671,7 +703,9 @@ class ActViTMAEEncoder(nn.Module):
             all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
+            return tuple(
+                v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None
+            )
         return BaseModelOutput(
             last_hidden_state=hidden_states,
             hidden_states=all_hidden_states,
@@ -801,9 +835,13 @@ class ActViTMAEModel(ActViTMAEPreTrainedModel):
         >>> outputs = model(**inputs)
         >>> last_hidden_states = outputs.last_hidden_state
         ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_attentions = (
+            output_attentions if output_attentions is not None else self.config.output_attentions
+        )
         output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -935,7 +973,9 @@ class ActViTMAEDecoder(nn.Module):
         mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1)
         x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
         # unshuffle
-        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]).to(x_.device))
+        x_ = torch.gather(
+            x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]).to(x_.device)
+        )
         x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
         # add pos embed
         if interpolate_pos_encoding:
@@ -959,7 +999,9 @@ class ActViTMAEDecoder(nn.Module):
                     output_attentions,
                 )
             else:
-                layer_outputs = layer_module(hidden_states, head_mask=None, output_attentions=output_attentions)
+                layer_outputs = layer_module(
+                    hidden_states, head_mask=None, output_attentions=output_attentions
+                )
 
             hidden_states = layer_outputs[0]
 
@@ -978,7 +1020,9 @@ class ActViTMAEDecoder(nn.Module):
         logits = logits[:, 1:, :]
 
         if not return_dict:
-            return tuple(v for v in [logits, all_hidden_states, all_self_attentions] if v is not None)
+            return tuple(
+                v for v in [logits, all_hidden_states, all_self_attentions] if v is not None
+            )
         return ActViTMAEDecoderOutput(
             logits=logits,
             hidden_states=all_hidden_states,
@@ -1036,9 +1080,12 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         patch_size, num_channels = self.config.patch_size, self.config.num_channels
         # sanity checks
         if not interpolate_pos_encoding and (
-            pixel_values.shape[2] != pixel_values.shape[3] or pixel_values.shape[2] % patch_size != 0
+            pixel_values.shape[2] != pixel_values.shape[3]
+            or pixel_values.shape[2] % patch_size != 0
         ):
-            raise ValueError("Make sure the pixel values have a squared size that is divisible by the patch size")
+            raise ValueError(
+                "Make sure the pixel values have a squared size that is divisible by the patch size"
+            )
         if pixel_values.shape[1] != num_channels:
             raise ValueError(
                 "Make sure the number of channels of the pixel values is equal to the one set in the configuration"
@@ -1057,7 +1104,9 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         )
         return patchified_pixel_values
 
-    def unpatchify(self, patchified_pixel_values, original_image_size: Optional[Tuple[int, int]] = None):
+    def unpatchify(
+        self, patchified_pixel_values, original_image_size: Optional[Tuple[int, int]] = None
+    ):
         """
         Args:
             patchified_pixel_values (`torch.FloatTensor` of shape `(batch_size, num_patches, patch_size**2 * num_channels)`:
@@ -1130,7 +1179,9 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         return loss
 
     @add_start_docstrings_to_model_forward(VIT_MAE_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=ActViTMAEForPreTrainingOutput, config_class=_CONFIG_FOR_DOC)
+    @replace_return_docstrings(
+        output_type=ActViTMAEForPreTrainingOutput, config_class=_CONFIG_FOR_DOC
+    )
     def forward(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
@@ -1180,11 +1231,17 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         ids_restore = outputs.ids_restore
         mask = outputs.mask
 
-        decoder_outputs = self.decoder(latent, ids_restore, interpolate_pos_encoding=interpolate_pos_encoding)
-        logits = decoder_outputs.logits  # shape (batch_size, num_patches, patch_size*patch_size*num_channels)
+        decoder_outputs = self.decoder(
+            latent, ids_restore, interpolate_pos_encoding=interpolate_pos_encoding
+        )
+        logits = (
+            decoder_outputs.logits
+        )  # shape (batch_size, num_patches, patch_size*patch_size*num_channels)
 
         # Loss is computed with respect to full image pixel values
-        loss = self.forward_loss(pixel_values, logits, mask, interpolate_pos_encoding=interpolate_pos_encoding)
+        loss = self.forward_loss(
+            pixel_values, logits, mask, interpolate_pos_encoding=interpolate_pos_encoding
+        )
 
         if not return_dict:
             output = (logits, mask, ids_restore) + outputs[2:]
@@ -1200,4 +1257,9 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         )
 
 
-__all__ = ["ActViTMAEForPreTraining", "ActViTMAELayer", "ActViTMAEModel", "ActViTMAEPreTrainedModel"]
+__all__ = [
+    "ActViTMAEForPreTraining",
+    "ActViTMAELayer",
+    "ActViTMAEModel",
+    "ActViTMAEPreTrainedModel",
+]

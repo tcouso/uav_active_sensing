@@ -1,7 +1,10 @@
 import torch
 from typing import Union, Optional, Tuple
 
-from transformers.models.vit_mae.modeling_tf_vit_mae import ViTMAEForPreTraining, ViTMAEForPreTrainingOutput
+from transformers.models.vit_mae.modeling_tf_vit_mae import (
+    ViTMAEForPreTraining,
+    ViTMAEForPreTrainingOutput,
+)
 
 
 class ActViTMAEForPreTraining(ViTMAEForPreTraining):
@@ -40,11 +43,17 @@ class ActViTMAEForPreTraining(ViTMAEForPreTraining):
         ids_restore = outputs.ids_restore
         mask = outputs.mask
 
-        decoder_outputs = self.decoder(latent, ids_restore, interpolate_pos_encoding=interpolate_pos_encoding)
-        logits = decoder_outputs.logits  # shape (batch_size, num_patches, patch_size*patch_size*num_channels)
+        decoder_outputs = self.decoder(
+            latent, ids_restore, interpolate_pos_encoding=interpolate_pos_encoding
+        )
+        logits = (
+            decoder_outputs.logits
+        )  # shape (batch_size, num_patches, patch_size*patch_size*num_channels)
 
         # Loss is computed with respect to complete image
-        loss = self.forward_loss(pixel_values, logits, mask, interpolate_pos_encoding=interpolate_pos_encoding)
+        loss = self.forward_loss(
+            pixel_values, logits, mask, interpolate_pos_encoding=interpolate_pos_encoding
+        )
 
         if not return_dict:
             output = (logits, mask, ids_restore) + outputs[2:]
@@ -76,7 +85,9 @@ class ActViTMAEForPreTraining(ViTMAEForPreTraining):
         batch_size, seq_length, dim = sequence.shape
 
         # Identify patches with NaN values
-        nan_mask = torch.isnan(sequence).any(dim=-1)  # Shape: (batch_size, seq_length), True if any NaN in patch
+        nan_mask = torch.isnan(sequence).any(
+            dim=-1
+        )  # Shape: (batch_size, seq_length), True if any NaN in patch
 
         # Keep only non-NaN patches
         ids_keep = (~nan_mask).nonzero(as_tuple=True)  # Get indices of patches to keep

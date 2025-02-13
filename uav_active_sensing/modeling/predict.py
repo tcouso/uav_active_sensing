@@ -9,6 +9,10 @@ from uav_active_sensing.config import MODELS_DIR, PROCESSED_DATA_DIR
 app = typer.Typer()
 
 
+# TODO: Take trained agent, obtain mask of new images according to trained (fixed) policy. Store masks for visualization
+# TODO: Take masked and actual image and generate predicted image with ViTMAE
+
+
 @app.command()
 def main(
     # ---- REPLACE DEFAULT PATHS AS APPROPRIATE ----

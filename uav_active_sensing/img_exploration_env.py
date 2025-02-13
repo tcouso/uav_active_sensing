@@ -13,6 +13,7 @@ from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEConfi
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
 
+
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0
 
@@ -64,7 +65,7 @@ class ImageExplorationEnv(gym.Env):
             device (Optional[str]): The device to use ('cpu' or 'cuda'). Defaults to 'cpu'.
         """
         if device is None:
-            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
         self.img = img.to(self.device)
         self.img_height, self.img_width = img.shape[2:]
@@ -77,14 +78,25 @@ class ImageExplorationEnv(gym.Env):
             self.sensor_width = config.patch_size
 
         self._sensor_min_pos = [0, 0]
-        self.__sensor_pos = [rd.randint(0, self.img_height,), rd.randint(0, self.img_width,)]
+        self.__sensor_pos = [
+            rd.randint(
+                0,
+                self.img_height,
+            ),
+            rd.randint(
+                0,
+                self.img_width,
+            ),
+        ]
 
         self._min_kernel_size = 1
         self._max_kernel_size = make_kernel_size_odd(self.img_height - self.sensor_height + 1)
         self.__kernel_size = self._min_kernel_size
 
-        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
-        self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
+        self._sampled_kernel_size_mask = torch.full_like(
+            self.img, fill_value=self._max_kernel_size, dtype=torch.int32
+        )
+        self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
 
         # Gymnasium interface
         self.observation_space = spaces.Box(
@@ -97,14 +109,13 @@ class ImageExplorationEnv(gym.Env):
         self.action_space = spaces.Box(
             low=np.array([-config.v_max_x, -config.v_max_y, -config.v_max_z], dtype=np.float32),
             high=np.array([config.v_max_x, config.v_max_y, config.v_max_z], dtype=np.float32),
-            dtype=np.int32
+            dtype=np.int32,
         )
         self._max_steps = config.max_steps
         self._step_count = 0
 
         self.reward_function = reward_function
         self.interval_reward_assignment = config.interval_reward_assignment
-        
 
     def _get_obs(self):
 
@@ -127,8 +138,10 @@ class ImageExplorationEnv(gym.Env):
         self._kernel_size = z
 
         # Clear episode variables
-        self.sampled_img = torch.full_like(self.img, float('nan'), device=self.device)
-        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self._max_kernel_size, dtype=torch.int32)
+        self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
+        self._sampled_kernel_size_mask = torch.full_like(
+            self.img, fill_value=self._max_kernel_size, dtype=torch.int32
+        )
         self._step_count = 0
 
         observation = self._get_obs()
@@ -149,12 +162,12 @@ class ImageExplorationEnv(gym.Env):
             reward = torch.tensor(0)
 
         self._step_count += 1
-        terminated = (self._step_count == self._max_steps)
+        terminated = self._step_count == self._max_steps
         truncated = False
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info
-    
+
     @property
     def step_count(self):
 
@@ -235,8 +248,12 @@ class ImageExplorationEnv(gym.Env):
         Args:
             kernel_size (int): The new kernel size.
         """
-        max_kernel_size_from_sensor_pos = make_kernel_size_odd(min(self.img_height, self.img_width) - max(self._sensor_pos))  # Current position restricts kernel size
-        new_kernel_size = max(min(new_kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size)
+        max_kernel_size_from_sensor_pos = make_kernel_size_odd(
+            min(self.img_height, self.img_width) - max(self._sensor_pos)
+        )  # Current position restricts kernel size
+        new_kernel_size = max(
+            min(new_kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size
+        )
 
         self.__kernel_size = make_kernel_size_odd(new_kernel_size)
 
@@ -252,7 +269,7 @@ class ImageExplorationEnv(gym.Env):
             torch.Tensor: A blurred tensor with the same shape as the input window.
         """
         padding = self._kernel_size // 2
-        window_padded = F.pad(window, (padding, padding, padding, padding), mode='reflect')
+        window_padded = F.pad(window, (padding, padding, padding, padding), mode="reflect")
         blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
 
         assert blurred.shape == window.shape  # error here
@@ -276,7 +293,9 @@ class ImageExplorationEnv(gym.Env):
 
         # Blur mask update
         updated_mask = curr_mask < prev_mask
-        self._sampled_kernel_size_mask[:, :, top:bottom, left:right][updated_mask] = curr_mask[updated_mask]
+        self._sampled_kernel_size_mask[:, :, top:bottom, left:right][updated_mask] = curr_mask[
+            updated_mask
+        ]
 
         # Observation update
         prev_obs = self.sampled_img[:, :, top:bottom, left:right]
@@ -317,11 +336,17 @@ class ImageExplorationEnv(gym.Env):
 
         self._update_sampled_img()
 
-    def random_walk(self, steps: int, planar_step_size: int = 10, altitude_step_size: int = 1):  # Temporal debug method
+    def random_walk(
+        self, steps: int, planar_step_size: int = 10, altitude_step_size: int = 1
+    ):  # Temporal debug method
         for _ in range(steps):
-            dx = rd.choice([-planar_step_size, 0, planar_step_size])  # Move left, stay, or move right
+            dx = rd.choice(
+                [-planar_step_size, 0, planar_step_size]
+            )  # Move left, stay, or move right
             dy = rd.choice([-planar_step_size, 0, planar_step_size])  # Move up, stay, or move down
-            dz = rd.choice([-altitude_step_size, 0, altitude_step_size])  # Zoom in, stay, or zoom out
+            dz = rd.choice(
+                [-altitude_step_size, 0, altitude_step_size]
+            )  # Zoom in, stay, or zoom out
 
             self.move(dx, dy, dz)
 

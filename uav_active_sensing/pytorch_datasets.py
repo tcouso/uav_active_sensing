@@ -3,6 +3,7 @@ import os
 from torch.utils.data import Dataset
 from PIL import Image
 
+
 class TinyImageNetDataset(Dataset):
     def __init__(self, root_dir, split, transform=None):
         """
@@ -15,7 +16,7 @@ class TinyImageNetDataset(Dataset):
         self.transform = transform
         self.data = []
         self.labels = []
-        
+
         if split == "train":
             for class_dir in os.listdir(self.root_dir):
                 class_path = self.root_dir / class_dir / "images"
@@ -48,4 +49,3 @@ class TinyImageNetDataset(Dataset):
             img = self.transform(img)
 
         return img, label
-
