@@ -11,7 +11,7 @@ from gymnasium import spaces
 
 from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEConfig
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
-
+from uav_active_sensing.config import DEVICE
 
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0
@@ -52,7 +52,7 @@ class ImageExplorationEnv(gym.Env):
         img: torch.Tensor,
         reward_function: RewardFunction,
         img_sensor_ratio: Optional[int] = None,
-        device: Optional[str] = "cpu",
+        device: Optional[str] = DEVICE,
         config: ActViTMAEConfig = None,
     ) -> None:
         """

@@ -9,7 +9,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
-
+from uav_active_sensing.config import DEVICE
 
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0
@@ -34,7 +34,7 @@ class RewardFunction:
 
 @dataclass
 class ImageExplorationEnvConfig:
-    device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device: str = DEVICE
     patch_size: int = 16
     max_steps: int = 20
     interval_reward_assignment: int = 10

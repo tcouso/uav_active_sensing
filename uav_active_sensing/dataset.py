@@ -18,7 +18,7 @@ def download_and_extract_tiny_imagenet(target_dir: Path):
     """Downloads and extracts the Tiny ImageNet dataset."""
     target_dir.mkdir(parents=True, exist_ok=True)
     zip_path = target_dir / "tiny-imagenet-200.zip"
-    
+
     if not zip_path.exists():
         logger.info("Downloading Tiny ImageNet dataset...")
         response = requests.get(TINY_IMAGENET_URL, stream=True)
@@ -42,18 +42,17 @@ def download_and_extract_tiny_imagenet(target_dir: Path):
 
 @app.command()
 def main():
-    transform = transforms.Compose([transforms.ToTensor()])
-    
+
     # Download and process CIFAR-10
     cifar10_processed_dir = PROCESSED_DATA_DIR / "cifar10"
     datasets.CIFAR10(
-        root=cifar10_processed_dir, train=True, download=True, transform=transform
+        root=cifar10_processed_dir, train=True, download=True
     )
     datasets.CIFAR10(
-        root=cifar10_processed_dir, train=False, download=True, transform=transform
+        root=cifar10_processed_dir, train=False, download=True
     )
     logger.info(f"CIFAR-10 datasets have been downloaded and stored in {cifar10_processed_dir}")
-    
+
     # Download and extract Tiny ImageNet
     download_and_extract_tiny_imagenet(TINY_IMAGENET_PROCESSED_DIR)
     logger.info(f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_PROCESSED_DIR}")

@@ -1,4 +1,5 @@
 import typer
+import torch
 from torch.utils.data import DataLoader
 from transformers import AutoImageProcessor
 
@@ -7,8 +8,15 @@ from uav_active_sensing.pytorch_dataloaders import TinyImageNetDataset
 from uav_active_sensing.modeling.img_exploration_env import RewardFunction
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.ppo import train_ppo
+from uav_active_sensing.config import DEVICE
 
+def tiny_imagenet_collate_fn(batch):
+    processed_batch = [
+        image[0]["pixel_values"].to(DEVICE)
+        for image in batch
+    ]
 
+    return torch.cat(processed_batch, dim=0)
 
 app = typer.Typer()
 
@@ -19,7 +27,7 @@ def main():
 
     image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
     tiny_imagenet_train_dataset = TinyImageNetDataset(root_dir=TINY_IMAGENET_PROCESSED_DIR, split="train", transform=image_processor)
-    tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset, batch_size=1, shuffle=True)
+    tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset, batch_size=1, collate_fn=tiny_imagenet_collate_fn)
 
     model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
     reward_function = RewardFunction(model)

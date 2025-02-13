@@ -14,8 +14,7 @@ from torch.distributions.normal import Normal
 from torch.utils.tensorboard import SummaryWriter
 
 from uav_active_sensing.modeling.img_exploration_env import ImageExplorationEnv, RewardFunction, ImageExplorationEnvConfig
-from uav_active_sensing.config import REPORTS_DIR, MODELS_DIR
-
+from uav_active_sensing.config import REPORTS_DIR, MODELS_DIR, DEVICE
 
 @dataclass
 class PPOConfig:
@@ -25,7 +24,7 @@ class PPOConfig:
     """seed of the experiment"""
     torch_deterministic: bool = True
     """if toggled, `torch.backends.cudnn.deterministic=False`"""
-    cuda: bool = False
+    cuda: bool = (DEVICE == "cuda")
     """if toggled, cuda will be enabled by default"""
     capture_video: bool = False
     """whether to capture videos of the agent performances (check out `videos` folder)"""
@@ -152,31 +151,29 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
     torch.manual_seed(ppo_config.seed)
     torch.backends.cudnn.deterministic = ppo_config.torch_deterministic
 
-    device = torch.device("cuda" if torch.cuda.is_available() and ppo_config.cuda else "cpu")
-
     # env setup
     envs = gym.vector.SyncVectorEnv(
         [make_env(img.unsqueeze(0), reward_function, ppo_config.gamma) for img in batch]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Box), "only continuous action space is supported"
 
-    agent = Agent(envs).to(device)
+    agent = Agent(envs).to(DEVICE)
     optimizer = optim.Adam(agent.parameters(), lr=ppo_config.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
-    obs = torch.zeros((ppo_config.num_steps, ppo_config.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((ppo_config.num_steps, ppo_config.num_envs) + envs.single_action_space.shape).to(device)
-    logprobs = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(device)
-    rewards = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(device)
-    dones = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(device)
-    values = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(device)
+    obs = torch.zeros((ppo_config.num_steps, ppo_config.num_envs) + envs.single_observation_space.shape).to(DEVICE)
+    actions = torch.zeros((ppo_config.num_steps, ppo_config.num_envs) + envs.single_action_space.shape).to(DEVICE)
+    logprobs = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(DEVICE)
+    rewards = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(DEVICE)
+    dones = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(DEVICE)
+    values = torch.zeros((ppo_config.num_steps, ppo_config.num_envs)).to(DEVICE)
 
     # TRY NOT TO MODIFY: start the game
     global_step = 0
     start_time = time.time()
     next_obs, _ = envs.reset(seed=ppo_config.seed)
-    next_obs = torch.Tensor(next_obs).to(device)
-    next_done = torch.zeros(ppo_config.num_envs).to(device)
+    next_obs = torch.Tensor(next_obs).to(DEVICE)
+    next_done = torch.zeros(ppo_config.num_envs).to(DEVICE)
 
     print("Num iters: ", ppo_config.num_iterations)
 
@@ -205,8 +202,8 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, terminations, truncations, infos = envs.step(action.cpu().numpy())
             next_done = np.logical_or(terminations, truncations)
-            rewards[step] = torch.tensor(reward).to(device).view(-1)
-            next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(next_done).to(device)
+            rewards[step] = torch.tensor(reward).to(DEVICE).view(-1)
+            next_obs, next_done = torch.Tensor(next_obs).to(DEVICE), torch.Tensor(next_done).to(DEVICE)
 
             if "final_info" in infos:
                 for info in infos["final_info"]:
@@ -218,7 +215,7 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
         # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
-            advantages = torch.zeros_like(rewards).to(device)
+            advantages = torch.zeros_like(rewards).to(DEVICE)
             lastgaelam = 0
             for t in reversed(range(ppo_config.num_steps)):
                 if t == ppo_config.num_steps - 1:
