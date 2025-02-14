@@ -106,7 +106,7 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-class Agent(nn.Module):
+class PPOAgent(nn.Module):
     def __init__(self, envs):
         super().__init__()
         self.critic = nn.Sequential(
@@ -151,6 +151,7 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
         % ("\n".join([f"|{key}|{value}|" for key, value in vars(ppo_config).items()])),
     )
 
+    # TODO: Centralized handling of this
     # TRY NOT TO MODIFY: seeding
     random.seed(ppo_config.seed)
     np.random.seed(ppo_config.seed)
@@ -165,7 +166,7 @@ def train_ppo(batch: torch.Tensor, reward_function: RewardFunction):
         envs.single_action_space, gym.spaces.Box
     ), "only continuous action space is supported"
 
-    agent = Agent(envs).to(DEVICE)
+    agent = PPOAgent(envs).to(DEVICE)
     optimizer = optim.Adam(agent.parameters(), lr=ppo_config.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup

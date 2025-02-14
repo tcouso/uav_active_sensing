@@ -49,7 +49,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 logger.info(f"Using device: {DEVICE}")
 
 # Batch size
-IMG_BATCH_SIZE = 4
+IMG_BATCH_SIZE = 1
 
 # If tqdm is installed, configure loguru with tqdm.write
 # https://github.com/Delgan/loguru/issues/135

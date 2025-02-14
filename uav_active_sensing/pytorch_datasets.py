@@ -4,6 +4,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from torchvision.transforms import functional as F
 from PIL import Image
 
 from uav_active_sensing.config import DEVICE, TINY_IMAGENET_DIR

@@ -12,7 +12,7 @@ from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagen
 from uav_active_sensing.modeling.img_exploration_env import RewardFunction, img_pairs_generator
 from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAETrainingConfig
-from uav_active_sensing.modeling.ppo import train_ppo, make_env, PPOConfig, Agent
+from uav_active_sensing.modeling.ppo import train_ppo, make_env, PPOConfig, PPOAgent
 from uav_active_sensing.utils import load_model_state_dict
 
 
@@ -29,7 +29,7 @@ def train_rl_agent():
     reward_function = RewardFunction(model)
 
     for img_batch in tiny_imagenet_train_loader:
-        train_ppo(img_batch, reward_function)  # TODO: One agent per epoch, not per batch
+        train_ppo(img_batch, reward_function)  # TODO: Open this call. Keep agent constant and env dependent of batch (new env every batch)
 
 
 @app.command()
@@ -64,10 +64,11 @@ def train_mae():
     for img_batch in tiny_imagenet_train_loader:
 
         # Mask generation with trained agent
+        # TODO: Set an inference mode (with no reward computation)
         vect_env = gym.vector.SyncVectorEnv(
             [make_env(img.unsqueeze(0), reward_function, ppo_config.gamma) for img in img_batch]
         )
-        trained_agent = Agent(vect_env)
+        trained_agent = PPOAgent(vect_env)
         trained_agent.load_state_dict(trained_model_state_dict)
         trained_agent.eval()
 
