@@ -4,7 +4,7 @@ import typer
 from loguru import logger
 from tqdm import tqdm
 
-from uav_active_sensing.config import FIGURES_DIR, PROCESSED_DATA_DIR
+from uav_active_sensing.config import FIGURES_DIR, PROCESSED_DATA_DIR, IMAGENET_MEAN, IMAGENET_STD
 
 import matplotlib.pyplot as plt
 
@@ -13,14 +13,11 @@ import torch
 
 # From: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/ViTMAE/ViT_MAE_visualization_demo.ipynb
 
-imagenet_mean = np.array([0.485, 0.456, 0.406])
-imagenet_std = np.array([0.229, 0.224, 0.225])
-
 
 def show_image(image, title=""):
     # image is [H, W, 3]
     assert image.shape[2] == 3
-    plt.imshow(torch.clip((image * imagenet_std + imagenet_mean) * 255, 0, 255).int())
+    plt.imshow(torch.clip((image * IMAGENET_STD + IMAGENET_MEAN) * 255, 0, 255).int())
     plt.title(title, fontsize=16)
     plt.axis("off")
     return

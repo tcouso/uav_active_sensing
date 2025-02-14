@@ -1,11 +1,23 @@
 from pathlib import Path
 import os
+
+import numpy as np
+import torch
 from torch.utils.data import Dataset
 from PIL import Image
 
+from uav_active_sensing.config import DEVICE, TINY_IMAGENET_DIR
+
+# Tiny imagenet
+
+def tiny_imagenet_collate_fn(batch):
+    processed_batch = [image[0]["pixel_values"].to(DEVICE) for image in batch]
+
+    return torch.cat(processed_batch, dim=0)
+
 
 class TinyImageNetDataset(Dataset):
-    def __init__(self, root_dir, split, transform=None):
+    def __init__(self, root_dir=TINY_IMAGENET_DIR, split=None, transform=None):
         """
         Args:
             root_dir (Path or str): Root directory of the dataset (tiny-imagenet-200).
@@ -49,3 +61,5 @@ class TinyImageNetDataset(Dataset):
             img = self.transform(img)
 
         return img, label
+
+

@@ -4,14 +4,11 @@ from loguru import logger
 from tqdm import tqdm
 import requests
 import zipfile
-from torchvision import datasets, transforms
+from torchvision import datasets
 
-from uav_active_sensing.config import PROCESSED_DATA_DIR
-
+from uav_active_sensing.config import TINY_IMAGENET_DIR, TINY_IMAGENET_URL, CIFAR10_DIR
 app = typer.Typer()
 
-TINY_IMAGENET_URL = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
-TINY_IMAGENET_PROCESSED_DIR = PROCESSED_DATA_DIR / "tiny_imagenet"
 
 
 def download_and_extract_tiny_imagenet(target_dir: Path):
@@ -43,17 +40,14 @@ def download_and_extract_tiny_imagenet(target_dir: Path):
 @app.command()
 def main():
 
-    # Download and process CIFAR-10
-    cifar10_processed_dir = PROCESSED_DATA_DIR / "cifar10"
-    datasets.CIFAR10(root=cifar10_processed_dir, train=True, download=True)
-    datasets.CIFAR10(root=cifar10_processed_dir, train=False, download=True)
-    logger.info(f"CIFAR-10 datasets have been downloaded and stored in {cifar10_processed_dir}")
+    # Download CIFAR-10
+    datasets.CIFAR10(root=CIFAR10_DIR, train=True, download=True)
+    datasets.CIFAR10(root=CIFAR10_DIR, train=False, download=True)
+    logger.info(f"CIFAR-10 datasets have been downloaded and stored in {CIFAR10_DIR}")
 
     # Download and extract Tiny ImageNet
-    download_and_extract_tiny_imagenet(TINY_IMAGENET_PROCESSED_DIR)
-    logger.info(
-        f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_PROCESSED_DIR}"
-    )
+    download_and_extract_tiny_imagenet(TINY_IMAGENET_DIR)
+    logger.info(f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_DIR}")
 
 
 if __name__ == "__main__":

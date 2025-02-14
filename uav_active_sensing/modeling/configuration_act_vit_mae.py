@@ -16,15 +16,17 @@
 # limitations under the License.
 """ViT MAE model configuration (with modifications)."""
 
+from dataclasses import dataclass
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
+from uav_active_sensing.config import SEED
 
 logger = logging.get_logger(__name__)
 
 
-class ActViTMAEConfig(PretrainedConfig):
+class ActViTMAEPretrainedConfig(PretrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`ViTMAEModel`]. It is used to instantiate an ViT
     MAE model according to the specified arguments, defining the model architecture. Instantiating a configuration with
@@ -137,5 +139,39 @@ class ActViTMAEConfig(PretrainedConfig):
         self.decoder_intermediate_size = decoder_intermediate_size
         self.norm_pix_loss = norm_pix_loss
 
+# Param configuration from https://github.com/huggingface/transformers/tree/main/examples/pytorch/image-pretraining#mae
+@dataclass
+class ActViTMAETrainingConfig:
+    # General training parameters
+    dataset_name: str = "tiny-imagenet-200"
+    output_dir: str = "./vit-mae-finetuned"
+    remove_unused_columns: bool = False
+    label_names: str = "pixel_values"
 
-__all__ = ["ActViTMAEConfig"]
+    # Model-specific parameters
+    mask_ratio: float = 0.75
+    norm_pix_loss: bool = True
+
+    # Training loop parameters
+    base_learning_rate: float = 1.5e-4
+    lr_scheduler_type: str = "cosine"
+    weight_decay: float = 0.05
+    num_train_epochs: int = 800
+    warmup_ratio: float = 0.05
+    per_device_train_batch_size: int = 8
+    per_device_eval_batch_size: int = 8
+
+    # Logging and evaluation
+    logging_strategy: str = "steps"
+    logging_steps: int = 10
+    eval_strategy: str = "epoch"
+    save_strategy: str = "epoch"
+    load_best_model_at_end: bool = True
+    save_total_limit: int = 3
+
+    # Randomness and reproducibility
+    seed: int = SEED
+
+
+
+__all__ = ["ActViTMAEPretrainedConfig"]

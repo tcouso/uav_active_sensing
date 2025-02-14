@@ -40,7 +40,7 @@ from transformers.utils import (
     replace_return_docstrings,
     torch_int,
 )
-from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEConfig
+from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEPretrainedConfig
 
 
 logger = logging.get_logger(__name__)
@@ -390,13 +390,13 @@ class ActViTMAEPatchEmbeddings(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTSelfAttention ViT->ActViTMAE
 class ActViTMAESelfAttention(nn.Module):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
             config, "embedding_size"
         ):
             raise ValueError(
-                f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
+                f"The hidden size {config.hidden_size, } is not a multiple of the number of attention "
                 f"heads {config.num_attention_heads}."
             )
 
@@ -456,7 +456,7 @@ class ActViTMAESelfAttention(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTSdpaSelfAttention ViT->ActViTMAE
 class ActViTMAESdpaSelfAttention(ActViTMAESelfAttention):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__(config)
         self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
 
@@ -509,7 +509,7 @@ class ActViTMAESelfOutput(nn.Module):
     layernorm applied before each block.
     """
 
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -523,7 +523,7 @@ class ActViTMAESelfOutput(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTAttention with ViT->ActViTMAE
 class ActViTMAEAttention(nn.Module):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.attention = ActViTMAESelfAttention(config)
         self.output = ActViTMAESelfOutput(config)
@@ -568,14 +568,14 @@ class ActViTMAEAttention(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTSdpaAttention with ViT->ActViTMAE
 class ActViTMAESdpaAttention(ActViTMAEAttention):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__(config)
         self.attention = ActViTMAESdpaSelfAttention(config)
 
 
 # Copied from transformers.models.vit.modeling_vit.ViTIntermediate ViT->ActViTMAE
 class ActViTMAEIntermediate(nn.Module):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
         if isinstance(config.hidden_act, str):
@@ -592,7 +592,7 @@ class ActViTMAEIntermediate(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTOutput ViT->ActViTMAE
 class ActViTMAEOutput(nn.Module):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
@@ -616,7 +616,7 @@ ActVITMAE_ATTENTION_CLASSES = {
 class ActViTMAELayer(nn.Module):
     """This corresponds to the Block class in the timm implementation."""
 
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
@@ -659,7 +659,7 @@ class ActViTMAELayer(nn.Module):
 
 # Copied from transformers.models.vit.modeling_vit.ViTEncoder with ViT->ActViTMAE
 class ActViTMAEEncoder(nn.Module):
-    def __init__(self, config: ActViTMAEConfig) -> None:
+    def __init__(self, config: ActViTMAEPretrainedConfig) -> None:
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList(
@@ -719,7 +719,7 @@ class ActViTMAEPreTrainedModel(PreTrainedModel):
     models.
     """
 
-    config_class = ActViTMAEConfig
+    config_class = ActViTMAEPretrainedConfig
     base_model_prefix = "vit"
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
@@ -1219,7 +1219,6 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
 
         outputs = self.vit(
             sampled_pixel_values,  # Sampled pixel values are given to the encoder
-            # noise=noise,
             head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,

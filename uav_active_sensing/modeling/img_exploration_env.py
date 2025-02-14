@@ -15,6 +15,18 @@ set_seed()
 
 # TODO: Give seed parameter for deterministic behaviour
 # TODO: Make obs space consisten with actual obs space
+# TODO: Handle env vectorization here
+
+def unwrap_env(env):
+    """ Recursively unwraps a vectorized environment to get the base env. """
+    while hasattr(env, "env"):
+        env = env.env
+    return env
+
+def img_pairs_generator(vect_env: gym.vector.SyncVectorEnv):
+    for env in vect_env.envs:
+        base_env = unwrap_env(env)
+        yield base_env.img, base_env.sampled_img
 
 def make_kernel_size_odd(n: int) -> int:
     assert n > 0
