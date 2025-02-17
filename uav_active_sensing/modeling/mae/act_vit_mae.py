@@ -40,7 +40,7 @@ from transformers.utils import (
     replace_return_docstrings,
     torch_int,
 )
-from uav_active_sensing.modeling.configuration_act_vit_mae import ActViTMAEPretrainedConfig
+from uav_active_sensing.modeling.mae.act_vit_mae_config import ActViTMAEPretrainedConfig
 
 
 logger = logging.get_logger(__name__)

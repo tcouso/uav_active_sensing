@@ -8,28 +8,13 @@ import torch.nn.functional as F
 import gymnasium as gym
 from gymnasium import spaces
 
-from uav_active_sensing.modeling.act_vit_mae import ActViTMAEForPreTraining
-from uav_active_sensing.config import DEVICE, set_seed, IMAGENET_MEAN, IMAGENET_STD
+from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
+from uav_active_sensing.config import DEVICE, set_seed, SEED
 
 set_seed()
 
-# TODO: Give seed parameter for deterministic behaviour
-# TODO: Make obs space consisten with actual obs space
-# TODO: Handle env vectorization here
-# TODO: Handle this compatibility: https://stable-baselines3.readthedocs.io/en/master/guide/custom_env.html
-
-
-def unwrap_env(env):
-    """ Recursively unwraps a vectorized environment to get the base env. """
-    while hasattr(env, "env"):
-        env = env.env
-    return env
-
-
-def img_pairs_generator(vect_env: gym.vector.SyncVectorEnv):
-    for env in vect_env.envs:
-        base_env = unwrap_env(env)
-        yield base_env.img, base_env.sampled_img
+# TODO: Guaratee deterministic behaviour given seed
+# TODO: Handle batch envs
 
 
 def make_kernel_size_odd(n: int) -> int:
@@ -57,11 +42,11 @@ class RewardFunction:
 class ImageExplorationEnvConfig:
     device: str = DEVICE
     patch_size: int = 16
-    max_steps: int = 10
-    interval_reward_assignment: int = 10
-    v_max_x: int = 10
-    v_max_y: int = 10
-    v_max_z: int = 0
+    max_steps: int = 30
+    interval_reward_assignment: int = 2
+    v_max_x: int = 16
+    v_max_y: int = 16
+    v_max_z: int = 16
 
     # Set during execution
     img_sensor_ratio: float = None
@@ -72,6 +57,7 @@ class ImageExplorationEnvConfig:
 class ImageExplorationEnv(gym.Env):
 
     def __init__(self, env_config: ImageExplorationEnvConfig) -> None:
+        super().__init__()
         self.device = env_config.device
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
@@ -91,6 +77,10 @@ class ImageExplorationEnv(gym.Env):
         self._max_kernel_size = make_kernel_size_odd(self.img_height - self.sensor_height + 1)
         self.__kernel_size = self._min_kernel_size
 
+        self.v_max_x = env_config.v_max_x
+        self.v_max_y = env_config.v_max_y
+        self.v_max_z = env_config.v_max_z
+
         self._sampled_kernel_size_mask = torch.full_like(
             self.img, fill_value=self._max_kernel_size, dtype=torch.int32
         )
@@ -104,43 +94,48 @@ class ImageExplorationEnv(gym.Env):
         self.interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Box(
-            low=0.0,  # Normalized minimum value
-            high=1.0,  # Normalized maximum value
-            shape=(1, 3, 224, 224),  # Shape of the normalized image
-            dtype=np.float32  # Data type for normalized tensor
+            low=-3.0,  # Bounds are a conservative estimate based on ImageNet normalization params
+            high=3.0,
+            shape=(1, 3, 224, 224),
+            dtype=np.float32
         )
 
         self.action_space = spaces.Box(
             low=np.array(
-                [-env_config.v_max_x, -env_config.v_max_y, -env_config.v_max_z], dtype=np.float32
+                [-1, -1, -1], dtype=np.float32
             ),
             high=np.array(
-                [env_config.v_max_x, env_config.v_max_y, env_config.v_max_z], dtype=np.float32
+                [1, 1, 1], dtype=np.float32
             ),
             dtype=np.float32,
         )
 
-    def _get_obs(self):
+    def _get_obs(self) -> np.ndarray:
 
+        obs = torch.nan_to_num(self.sampled_img, nan=0.0).detach().numpy()
 
-        return self.sampled_img.detach().numpy()
+        return obs
 
     def _get_info(self):
         info = {}
 
         return info
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+    def _denormalize_action(self, action: Tuple[float, float, float]) -> Tuple[int, int, int]:
+        # Env action space bounds
+        low = np.array([-self.v_max_x, -self.v_max_y, -self.v_max_z], dtype=np.float32)
+        high = np.array([self.v_max_x, self.v_max_y, self.v_max_z], dtype=np.float32)
 
-        super().reset(seed=seed)
+        # Denormalize action
+        denormalized_action = low + (action + 1) * 0.5 * (high - low)
 
-        x = rd.randint(0, self.img_height)
-        y = rd.randint(0, self.img_width)
+        dx, dy, dz = denormalized_action.astype(int)  # Enforce int actions in this env
 
-        self._sensor_pos = (x, y)
+        return dx, dy, dz
 
-        z = make_kernel_size_odd(rd.randint(self._min_kernel_size, self._max_kernel_size))
-        self._kernel_size = z
+    def reset(self, seed: Optional[int] = SEED, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
+        if seed != None:
+            super().reset(seed=seed)
 
         # Clear episode variables
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
@@ -149,16 +144,18 @@ class ImageExplorationEnv(gym.Env):
         )
         self._step_count = 0
 
+        action = self.action_space.sample()
+        dx, dy, dz = self._denormalize_action(action)
+        self.move(dx, dy, dz)
+
         observation = self._get_obs()
         info = self._get_info()
 
         return observation, info
 
-    def step(self, action: Tuple[int, int, int]):
+    def step(self, action: Tuple[int, int, int]) -> Tuple[np.ndarray, float, bool, bool, dict]:
 
-        dx, dy, dz = action
-        dx, dy, dz = int(dx), int(dy), int(dz)  # Enforce int actions in this env
-
+        dx, dy, dz = self._denormalize_action(action)
         self.move(dx, dy, dz)
         observation = self._get_obs()
 
@@ -168,19 +165,17 @@ class ImageExplorationEnv(gym.Env):
         else:
             reward = float(0)
 
+        terminated = self._step_count >= self._max_steps
         self._step_count += 1
-        terminated = (
-            self._step_count == self._max_steps
-        )
+
         truncated = False
         info = self._get_info()
 
         return observation, reward, terminated, truncated, info
 
-    @property
-    def dataloader(self):
+    def set_img(self, new_img: torch.Tensor) -> None:
 
-        return self._dataloader
+        self.img = new_img
 
     @property
     def step_count(self):
@@ -241,7 +236,7 @@ class ImageExplorationEnv(gym.Env):
             new_position (Tuple[int, int]): The new (y, x) position for the sensor.
         """
         x, y = new_position
-        assert (x.is_integer() and y.is_integer())
+        # assert (x.is_integer() and y.is_integer())
         self.__sensor_pos[0] = max(min(x, self._sensor_max_pos[0]), self._sensor_min_pos[0])
         self.__sensor_pos[1] = max(min(y, self._sensor_max_pos[1]), self._sensor_min_pos[1])
 
@@ -287,7 +282,7 @@ class ImageExplorationEnv(gym.Env):
         window_padded = F.pad(window, (padding, padding, padding, padding), mode="reflect")
         blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
 
-        assert blurred.shape == window.shape
+        # assert blurred.shape == window.shape
 
         return blurred
 
@@ -343,7 +338,7 @@ class ImageExplorationEnv(gym.Env):
             dy (int): The change in the y-direction.
             dz (int): The change in the kernel size.
         """
-        assert (dx.is_integer() and dy.is_integer())
+        # assert (dx.is_integer() and dy.is_integer() and dz.is_integer())
 
         self._sensor_pos = (
             self._sensor_pos[0] + dy,
@@ -351,21 +346,3 @@ class ImageExplorationEnv(gym.Env):
         )
         self._kernel_size += dz
         self._update_sampled_img()
-
-
-def make_env(img: torch.Tensor, reward_function: RewardFunction, gamma: float):
-    def thunk():
-        config = ImageExplorationEnvConfig(img=img, reward_function=reward_function)
-        env = ImageExplorationEnv(config)  # TODO: make with seed
-        env = gym.wrappers.FlattenObservation(env)
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(
-            env, lambda obs: np.clip(obs, -10, 10), observation_space=env.observation_space
-        )
-        env = gym.wrappers.NormalizeReward(env, gamma=gamma)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
-        return env
-
-    return thunk
