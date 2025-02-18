@@ -26,7 +26,7 @@ set_seed()
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
     # assert torch.all(t > 0), "All values must be greater than 0"
 
-    return torch.where(t % 2 == 1, t, t - 1)
+    return torch.where(abs(t % 2) == 1, t, t - 1)
 
 
 class RewardFunction:
@@ -59,6 +59,8 @@ class ImageExplorationEnvConfig:
     img: torch.Tensor = None
     reward_function: RewardFunction = None
 
+# TODO: Ensure cuda placing
+
 
 class ImageExplorationEnv(gym.Env):
 
@@ -76,24 +78,23 @@ class ImageExplorationEnv(gym.Env):
             self.sensor_height = env_config.patch_size
             self.sensor_width = env_config.patch_size
 
-        self._sensor_min_pos = torch.zeros((self.batch_size, 2))
+        self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
         # self.__sensor_pos = [rd.randint(0, self.img_height), rd.randint(0, self.img_width)]
         self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height, (self.batch_size,)),
-            torch.randint(0, self.img_width, (self.batch_size,))
+            torch.randint(0, self.img_height, (self.batch_size,), dtype=torch.int32),
+            torch.randint(0, self.img_width, (self.batch_size,), dtype=torch.int32)
         ], dim=1)
 
-        self._min_kernel_size = torch.ones(self.batch_size, 1)
-        self._max_kernel_size = make_kernel_size_odd(torch.full((self.batch_size, 1), self.img_height - self.sensor_height + 1))
-        self.__kernel_size = self._min_kernel_size
+        self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
+        self._max_kernel_size = torch.full((self.batch_size, 1), self.img_height - self.sensor_height + 1, dtype=torch.int32)
+        self._max_kernel_size = make_kernel_size_odd(self._max_kernel_size)
+        self.__kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
 
         self.v_max_x = env_config.v_max_x
         self.v_max_y = env_config.v_max_y
         self.v_max_z = env_config.v_max_z
 
-        self._sampled_kernel_size_mask = torch.full_like(
-            self.img, fill_value=float('inf'), dtype=torch.float32
-        )
+        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=float('inf'), dtype=torch.float32)
 
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
 
@@ -129,17 +130,6 @@ class ImageExplorationEnv(gym.Env):
         return info
 
     # TODO: Adjust this to batch logic
-    # def _denormalize_action(self, action: Tuple[float, float, float]) -> Tuple[int, int, int]:
-    #     # Env action space bounds
-    #     low = np.array([-self.v_max_x, -self.v_max_y, -self.v_max_z], dtype=np.float32)
-    #     high = np.array([self.v_max_x, self.v_max_y, self.v_max_z], dtype=np.float32)
-
-    #     # Denormalize action
-    #     denormalized_action = low + (action + 1) * 0.5 * (high - low)
-
-    #     dx, dy, dz = denormalized_action.astype(int)  # Enforce int actions in this env
-
-    #     return dx, dy, dz
 
     def _denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
         # Env action space bounds
@@ -236,21 +226,18 @@ class ImageExplorationEnv(gym.Env):
     def fov_bbox(self) -> torch.Tensor:
         """Returns fov positions in top left bottom right format stacked over batch"""
 
-        # Assuming self._kernel_size is now a tensor with shape (batch_size,)
-        fov_size = self._kernel_size - 1  # Element-wise subtraction for each kernel size in the batch
+        fov_size = self._kernel_size - 1  # TODO: kernel size should be positive
+        # print(fov_size)
+        offset = torch.cat((fov_size.reshape(-1, 1), fov_size.reshape(-1, 1)), dim=1).to(self.device)
 
-        
-        # Create the offset tensor with the same shape as fov_size, each row having the same values for x and y
-        offset = torch.stack([fov_size, fov_size], dim=1).to(self.device)  # Shape: (batch_size, 2)
-        
+        # print(offset)
         # Calculate the bottom-right corner for each image in the batch
         bottom_right = self._sensor_pos + offset  # Broadcasting to match batch size
-        
+
         # Concatenate top-left and bottom-right corners along dimension 1
         fov_bbox = torch.cat((self._sensor_pos, bottom_right), dim=1)  # Shape: (batch_size, 4)
-        
-        return fov_bbox
 
+        return fov_bbox
 
     # TODO: Adjust this to batch logic
 
@@ -263,11 +250,6 @@ class ImageExplorationEnv(gym.Env):
         fov_bbox = self.fov_bbox
 
         assert fov_bbox.shape == (self.batch_size, 4)
-
-        # top = fov_bbox[:, 0]
-        # left = fov_bbox[:, 1]
-        # bottom = fov_bbox[:, 2]
-        # right = fov_bbox[:, 3]
 
         fov_height = fov_bbox[:, 0] - fov_bbox[:, 0]
         fov_width = fov_bbox[:, 3] - fov_bbox[:, 1]
@@ -289,47 +271,23 @@ class ImageExplorationEnv(gym.Env):
         """
         Sets the sensor position, ensuring it stays within valid bounds.
         """
-        # x, y = new_position
-        # assert (x.is_integer() and y.is_integer())
-        # self.__sensor_pos[0] = max(min(x, self._sensor_max_pos[0]), self._sensor_min_pos[0])
-        # self.__sensor_pos[1] = max(min(y, self._sensor_max_pos[1]), self._sensor_min_pos[1])
-
         assert new_position.shape == self.__sensor_pos.shape
 
-        # self.__sensor_pos = max(min(new_position, self._sensor_max_pos), self._sensor_min_pos)
         self.__sensor_pos = torch.clamp(new_position, min=self._sensor_min_pos, max=self._sensor_max_pos)
 
     # TODO: Adjust this to batch logic
     @property
-    def _kernel_size(self) -> int:
-        """
-        Gets the current kernel size.
+    def _kernel_size(self) -> torch.Tensor:
 
-        Returns:
-            int: The current kernel size.
-        """
         return self.__kernel_size
 
     # TODO: Adjust this to batch logic
     @_kernel_size.setter
-    def _kernel_size(self, new_kernel_size: int) -> None:
-        """
-        Sets the kernel size, ensuring it stays within valid bounds.
-
-        Args:
-            kernel_size (int): The new kernel size.
-        """
+    def _kernel_size(self, new_kernel_size: torch.Tensor) -> None:
         max_kernel_size_from_sensor_pos = min(self.img_height, self.img_width) - torch.amax(self._sensor_pos, dim=1)  # Current position restricts kernel size
-        max_kernel_size_from_sensor_pos = make_kernel_size_odd(max_kernel_size_from_sensor_pos)  # TODO: Fix 0 size kernel error
+        max_kernel_size_from_sensor_pos = make_kernel_size_odd(max_kernel_size_from_sensor_pos)
 
-        # new_kernel_size = max(
-        #     min(new_kernel_size, max_kernel_size_from_sensor_pos), self._min_kernel_size
-        # )
-        print(new_kernel_size)
-        print(self._min_kernel_size)
-        print(max_kernel_size_from_sensor_pos)
         new_kernel_size = torch.clamp(new_kernel_size, min=self._min_kernel_size, max=max_kernel_size_from_sensor_pos)
-
         self.__kernel_size = make_kernel_size_odd(new_kernel_size)
 
     # TODO: Adjust this to batch logic
@@ -386,16 +344,40 @@ class ImageExplorationEnv(gym.Env):
         """
         Updates the sampled image based on the current sensor position and kernel size.
         """
-        top, bottom, left, right = self.fov_bbox
-        obs = self.img[:, :, top:bottom, left:right].clone()
+        fov_bbox = self.fov_bbox
+
+        top = fov_bbox[:, 0].flatten()
+        left = fov_bbox[:, 1].flatten()
+        bottom = fov_bbox[:, 2].flatten()
+        right = fov_bbox[:, 3].flatten()
+
+        print(top.shape)
+
+        batch_indices = torch.arange(self.batch_size, device=self.device)[:, None, None]  # Shape: (B, 1, 1)
+
+        # Perform batch-wise indexing # TODO: Handle different size accross diferent images of batch
+        # there might be a breaking point here
+
+        obs = self.img[
+            batch_indices,  # Selects each batch index
+            :,              # Selects all channels
+            top[:, None, None]:bottom[:, None, None],  # Row range for each image
+            left[:, None]:right[:, None]  # Column range for each image
+        ].clone()
+
+        # top, bottom, left, right = self.fov_bbox
+        # obs = self.img[:, :, top:bottom, left:right].clone()
 
         if self._kernel_size > self._min_kernel_size:
             obs = self._apply_blur(obs)
             obs = obs
 
-        obs = self._filter_high_blur_obs(obs)
+        # obs = self._filter_high_blur_obs(obs) # TODO: Adapt to batch logic
 
-        self.sampled_img[:, :, top:bottom, left:right] = obs
+        print(obs)
+        print(obs.shape)
+
+        # self.sampled_img[:, :, top:bottom, left:right] = obs
 
     # TODO: Adjust this to batch logic
     def move(self, action: torch.Tensor) -> None:
@@ -411,6 +393,5 @@ class ImageExplorationEnv(gym.Env):
         assert action.shape == (self.batch_size, 3)
 
         self._sensor_pos += action[:, :2]
-
         self._kernel_size += action[:, 2]
-        # self._update_sampled_img()
+        self._update_sampled_img()
