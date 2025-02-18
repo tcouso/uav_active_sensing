@@ -60,6 +60,8 @@ def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_
         vec_env.env_method("set_img", batch)
         ppo_agent.learn(total_timesteps=2 * rl_num_steps, progress_bar=False)
 
+        # TODO: One grad update per batch
+
 
 if __name__ == "__main__":
     app()
