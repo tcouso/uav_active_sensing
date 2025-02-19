@@ -14,17 +14,9 @@ from uav_active_sensing.config import DEVICE, set_seed, SEED
 set_seed()
 
 # TODO: Guaratee deterministic behaviour given seed
-# TODO: Handle batch envs
-
-
-# def make_kernel_size_odd(n: int) -> int:
-#     assert n > 0
-
-#     return n if n % 2 == 1 else n - 1
 
 
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
-    # assert torch.all(t > 0), "All values must be greater than 0"
 
     return torch.where(abs(t % 2) == 1, t, t - 1)
 
@@ -52,7 +44,7 @@ class ImageExplorationEnvConfig:
     interval_reward_assignment: int = 2
     v_max_x: int = 16
     v_max_y: int = 16
-    v_max_z: int = 16
+    v_max_z: int = 0
 
     # Set during execution
     img_sensor_ratio: float = None
@@ -60,7 +52,6 @@ class ImageExplorationEnvConfig:
     reward_function: RewardFunction = None
 
 # TODO: Ensure cuda placing
-
 
 class ImageExplorationEnv(gym.Env):
 
@@ -79,15 +70,14 @@ class ImageExplorationEnv(gym.Env):
             self.sensor_width = env_config.patch_size
 
         self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
-        # self.__sensor_pos = [rd.randint(0, self.img_height), rd.randint(0, self.img_width)]
         self.__sensor_pos = torch.stack([
             torch.randint(0, self.img_height, (self.batch_size,), dtype=torch.int32),
             torch.randint(0, self.img_width, (self.batch_size,), dtype=torch.int32)
         ], dim=1)
 
         self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
-        self._max_kernel_size = torch.full((self.batch_size, 1), self.img_height - self.sensor_height + 1, dtype=torch.int32)
-        self._max_kernel_size = make_kernel_size_odd(self._max_kernel_size)
+        # self._max_kernel_size = torch.full((self.batch_size, 1), self.img_height - self.sensor_height + 1, dtype=torch.int32)
+        # self._max_kernel_size = make_kernel_size_odd(self._max_kernel_size)
         self.__kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
 
         self.v_max_x = env_config.v_max_x
@@ -98,7 +88,7 @@ class ImageExplorationEnv(gym.Env):
 
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
 
-        # Gymnasium interface
+        # Gymnasium interface     # TODO: Adjust this to batch logic
         self._max_steps = env_config.max_steps
         self._step_count = 0
 
@@ -124,12 +114,10 @@ class ImageExplorationEnv(gym.Env):
 
         return obs
 
-    def _get_info(self):
+    def _get_info(self):  # TODO: Look references of good info to give
         info = {}
 
         return info
-
-    # TODO: Adjust this to batch logic
 
     def _denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
         # Env action space bounds
@@ -147,25 +135,29 @@ class ImageExplorationEnv(gym.Env):
 
         # Clear episode variables
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
+        max_kernel_size = self.img_height - self.sensor_height + 1
         self._sampled_kernel_size_mask = torch.full_like(
-            self.img, fill_value=self._max_kernel_size, dtype=torch.int32
+            self.img,
+            fill_value=max_kernel_size,
+            dtype=torch.int32
         )
         self._step_count = 0
 
         action = self.action_space.sample()
-        dx, dy, dz = self._denormalize_action(action)
-        self.move(dx, dy, dz)
+        action = torch.from_numpy(action)
+        action = self._denormalize_action(action)
+        self.move(action)
 
         observation = self._get_obs()
         info = self._get_info()
 
         return observation, info
 
-    # TODO: Adjust this to batch logic
     def step(self, action: Tuple[int, int, int]) -> Tuple[np.ndarray, float, bool, bool, dict]:
 
-        dx, dy, dz = self._denormalize_action(action)
-        self.move(dx, dy, dz)
+        action = torch.from_numpy(action)
+        action = self._denormalize_action(action)
+        self.move(action)
         observation = self._get_obs()
 
         if self._step_count % self.interval_reward_assignment == 0:
@@ -191,55 +183,17 @@ class ImageExplorationEnv(gym.Env):
 
         return self._step_count
 
-    # # TODO: Adjust this to batch logic
-    # @property
-    # def fov_bbox(self) -> List[int]:
-    #     """
-    #     Computes the bounding box of the field of view (FoV) based on the current sensor position and kernel size.
-
-    #     Returns:
-    #         List[int]: A list of coordinates [top, bottom, left, right] defining the FoV bounding box.
-    #     """
-    #     fov_height = int(self.sensor_height + self._kernel_size - 1)
-    #     fov_width = int(self.sensor_width + self._kernel_size - 1)
-
-    #     top = self._sensor_pos[:, 0]
-    #     left = self._sensor_pos[:, 1]
-    #     bottom = self._sensor_pos[:, 0] + fov_height
-    #     right = self._sensor_pos[:, 1] + fov_width
-
-    #     return torch.cat((top, bottom, left, right), dim=1)
-
-    # @property
-    # def fov_bbox(self) -> torch.Tensor:
-    #     """Retuns fov positions in top left bottom right format stacked over batch"""
-
-    #     fov_size = self._kernel_size - 1 # TODO: Adapt to batched kernel sizes
-
-    #     offset = torch.tensor([fov_size, fov_size], device=self.device)
-    #     bottom_right = self._sensor_pos + offset
-    #     fov_bbox = torch.cat((self._sensor_pos, bottom_right), dim=1)
-
-    #     return fov_bbox
-
     @property
     def fov_bbox(self) -> torch.Tensor:
         """Returns fov positions in top left bottom right format stacked over batch"""
 
-        fov_size = self._kernel_size - 1  # TODO: kernel size should be positive
-        # print(fov_size)
+        fov_size = self._kernel_size - 1
+        sensor_size = torch.tensor((self.sensor_height, self.sensor_width), dtype=torch.int32)
         offset = torch.cat((fov_size.reshape(-1, 1), fov_size.reshape(-1, 1)), dim=1).to(self.device)
-
-        # print(offset)
-        # Calculate the bottom-right corner for each image in the batch
-        bottom_right = self._sensor_pos + offset  # Broadcasting to match batch size
-
-        # Concatenate top-left and bottom-right corners along dimension 1
-        fov_bbox = torch.cat((self._sensor_pos, bottom_right), dim=1)  # Shape: (batch_size, 4)
+        bottom_right = sensor_size + offset
+        fov_bbox = torch.cat((self._sensor_pos, self._sensor_pos + bottom_right), dim=1)
 
         return fov_bbox
-
-    # TODO: Adjust this to batch logic
 
     @property
     def _sensor_max_pos(self) -> torch.Tensor:
@@ -249,49 +203,63 @@ class ImageExplorationEnv(gym.Env):
         """
         fov_bbox = self.fov_bbox
 
-        assert fov_bbox.shape == (self.batch_size, 4)
-
-        fov_height = fov_bbox[:, 0] - fov_bbox[:, 0]
+        fov_height = fov_bbox[:, 2] - fov_bbox[:, 0]
         fov_width = fov_bbox[:, 3] - fov_bbox[:, 1]
+
+        # print(f"FoV height: {fov_height}")
+        # print(f"FoV width: {fov_width}")
 
         sensor_max_height = self.img_height - fov_height
         sensor_max_width = self.img_width - fov_width
+        # print(f"sensor_max_height: {sensor_max_height}")
+        # print(f"sensor_max_width: {sensor_max_width}")
 
-        return torch.cat((sensor_max_height.reshape(-1, 1), sensor_max_width.reshape(-1, 1)), dim=1)
+        sensor_max_pos = torch.cat((sensor_max_height.reshape(-1, 1), sensor_max_width.reshape(-1, 1)), dim=1)
 
-    # TODO: Adjust this to batch logic
+        assert torch.all(sensor_max_pos[:, 0] <= self.img_height), "Sensor max height can't be greater than img height"
+        assert torch.all(sensor_max_pos[:, 1] <= self.img_width), "Sensor max width can't be greater than img width"
+
+        return sensor_max_pos
+
     @property
     def _sensor_pos(self) -> torch.Tensor:
 
         return self.__sensor_pos
 
-    # TODO: Adjust this to batch logic
     @_sensor_pos.setter
     def _sensor_pos(self, new_position: torch.Tensor) -> None:
         """
         Sets the sensor position, ensuring it stays within valid bounds.
         """
-        assert new_position.shape == self.__sensor_pos.shape
 
-        self.__sensor_pos = torch.clamp(new_position, min=self._sensor_min_pos, max=self._sensor_max_pos)
+        assert torch.all(self._sensor_max_pos >= self._sensor_min_pos), "Sensor max position can't be less than min position"
+        # print(f"New pos before clamping: {new_position}")
+        new_position = torch.clamp(new_position, min=self._sensor_min_pos, max=self._sensor_max_pos)
+        # print(f"New pos after clamping: {new_position}")
 
-    # TODO: Adjust this to batch logic
+        self.__sensor_pos = new_position
+
     @property
     def _kernel_size(self) -> torch.Tensor:
 
         return self.__kernel_size
 
-    # TODO: Adjust this to batch logic
     @_kernel_size.setter
     def _kernel_size(self, new_kernel_size: torch.Tensor) -> None:
-        max_kernel_size_from_sensor_pos = min(self.img_height, self.img_width) - torch.amax(self._sensor_pos, dim=1)  # Current position restricts kernel size
+        # print(f"Previous kernel size: {self._kernel_size}")
+        max_kernel_size_from_sensor_pos = torch.minimum(self.img_height - self._sensor_pos[:, 0], self.img_width - self._sensor_pos[:, 1])
         max_kernel_size_from_sensor_pos = make_kernel_size_odd(max_kernel_size_from_sensor_pos)
 
         new_kernel_size = torch.clamp(new_kernel_size, min=self._min_kernel_size, max=max_kernel_size_from_sensor_pos)
-        self.__kernel_size = make_kernel_size_odd(new_kernel_size)
+        new_kernel_size = make_kernel_size_odd(new_kernel_size)
+        # print(f"New kernel size: {new_kernel_size}")
 
-    # TODO: Adjust this to batch logic
-    def _apply_blur(self, window: torch.Tensor) -> torch.Tensor:
+        assert torch.all(new_kernel_size > 0), "All values of new kernel size must be greater than 0"
+
+        self.__kernel_size = new_kernel_size
+
+    @staticmethod
+    def _apply_blur(window: torch.Tensor, kernel_size: int) -> torch.Tensor:
         """
         Applies an averaging blur to the input window tensor while considering margin artifacts.
 
@@ -302,84 +270,48 @@ class ImageExplorationEnv(gym.Env):
         Returns:
             torch.Tensor: A blurred tensor with the same shape as the input window.
         """
-        padding = int(self._kernel_size // 2)
+        padding = int(kernel_size // 2)
         window_padded = F.pad(window, (padding, padding, padding, padding), mode="reflect")
-        blurred = F.avg_pool2d(window_padded, kernel_size=self._kernel_size, stride=1, padding=0)
+        blurred = F.avg_pool2d(window_padded, kernel_size=kernel_size, stride=1, padding=0)
 
         # assert blurred.shape == window.shape
 
         return blurred
 
-    # TODO: Adjust this to batch logic
-    def _filter_high_blur_obs(self, obs: torch.Tensor) -> torch.Tensor:
-        """
-        Filters observations to ensure higher blur levels do not overwrite lower ones.
-
-        Args:
-            obs (torch.Tensor): The observed tensor.
-
-        Returns:
-            torch.Tensor: The filtered observation tensor.
-        """
-        top, bottom, left, right = self.fov_bbox
-
-        prev_mask = self._sampled_kernel_size_mask[:, :, top:bottom, left:right]
-        curr_mask = torch.full_like(prev_mask, fill_value=self._kernel_size)
-
-        # Blur mask update
-        updated_mask = curr_mask < prev_mask
-        self._sampled_kernel_size_mask[:, :, top:bottom, left:right][updated_mask] = curr_mask[
-            updated_mask
-        ]
-
-        # Observation update
-        prev_obs = self.sampled_img[:, :, top:bottom, left:right]
-        obs_to_update = curr_mask > prev_mask
-        obs[obs_to_update] = prev_obs[obs_to_update]
-
-        return obs
-
-    # TODO: Adjust this to batch logic
     def _update_sampled_img(self) -> None:
         """
         Updates the sampled image based on the current sensor position and kernel size.
         """
         fov_bbox = self.fov_bbox
+        for img_i in range(self.batch_size):
 
-        top = fov_bbox[:, 0].flatten()
-        left = fov_bbox[:, 1].flatten()
-        bottom = fov_bbox[:, 2].flatten()
-        right = fov_bbox[:, 3].flatten()
+            top = fov_bbox[img_i, 0].item()
+            left = fov_bbox[img_i, 1].item()
+            bottom = fov_bbox[img_i, 2].item()
+            right = fov_bbox[img_i, 3].item()
 
-        print(top.shape)
+            obs = self.img[img_i, :, top:bottom, left:right].clone()
 
-        batch_indices = torch.arange(self.batch_size, device=self.device)[:, None, None]  # Shape: (B, 1, 1)
+            if self._kernel_size[img_i] > self._min_kernel_size[img_i]:
+                obs = ImageExplorationEnv._apply_blur(obs, self._kernel_size[img_i].item())
 
-        # Perform batch-wise indexing # TODO: Handle different size accross diferent images of batch
-        # there might be a breaking point here
+            # Filter observations to ensure higher blur levels do not overwrite lower ones
+            prev_mask = self._sampled_kernel_size_mask[img_i, :, top:bottom, left:right]
+            curr_mask = torch.full_like(prev_mask, fill_value=self._kernel_size[img_i].item())
 
-        obs = self.img[
-            batch_indices,  # Selects each batch index
-            :,              # Selects all channels
-            top[:, None, None]:bottom[:, None, None],  # Row range for each image
-            left[:, None]:right[:, None]  # Column range for each image
-        ].clone()
+            # Blur mask update
+            updated_mask = curr_mask < prev_mask
+            self._sampled_kernel_size_mask[img_i, :, top:bottom, left:right][updated_mask] = curr_mask[
+                updated_mask
+            ]
 
-        # top, bottom, left, right = self.fov_bbox
-        # obs = self.img[:, :, top:bottom, left:right].clone()
+            # Observation update
+            prev_obs = self.sampled_img[img_i, :, top:bottom, left:right]
+            obs_to_update = curr_mask > prev_mask
+            obs[obs_to_update] = prev_obs[obs_to_update]
 
-        if self._kernel_size > self._min_kernel_size:
-            obs = self._apply_blur(obs)
-            obs = obs
+            self.sampled_img[img_i, :, top:bottom, left:right] = obs
 
-        # obs = self._filter_high_blur_obs(obs) # TODO: Adapt to batch logic
-
-        print(obs)
-        print(obs.shape)
-
-        # self.sampled_img[:, :, top:bottom, left:right] = obs
-
-    # TODO: Adjust this to batch logic
     def move(self, action: torch.Tensor) -> None:
         """
         Moves the sensor and updates the observation.
