@@ -1,9 +1,7 @@
-import random as rd
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 from dataclasses import dataclass
 
 import numpy as np
-import math
 import torch
 import torch.nn.functional as F
 import gymnasium as gym
@@ -46,10 +44,10 @@ class ImageExplorationEnvConfig:
     device: str = DEVICE
     patch_size: int = 16
     max_steps: int = 30
-    interval_reward_assignment: int = 2
-    v_max_x: int = 16
-    v_max_y: int = 16
-    v_max_z: int = 16
+    interval_reward_assignment: int = 5
+    v_max_x: int = patch_size * 2
+    v_max_y: int = patch_size * 2
+    v_max_z: int = 4
 
     # Set during execution
     img_sensor_ratio: float = None
@@ -57,6 +55,8 @@ class ImageExplorationEnvConfig:
     reward_function: RewardFunction = None
 
 # TODO: Ensure cuda placing
+
+
 class ImageExplorationEnv(gym.Env):
 
     def __init__(self, env_config: ImageExplorationEnvConfig) -> None:
@@ -75,8 +75,8 @@ class ImageExplorationEnv(gym.Env):
 
         self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
         self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height, (self.batch_size,), dtype=torch.int32),
-            torch.randint(0, self.img_width, (self.batch_size,), dtype=torch.int32)
+            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32),
+            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32)
         ], dim=1)
 
         self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
@@ -86,16 +86,14 @@ class ImageExplorationEnv(gym.Env):
         self.v_max_y = env_config.v_max_y
         self.v_max_z = env_config.v_max_z
 
-        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=float('inf'), dtype=torch.float32)
-
+        self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self.img_height // self.sensor_height, dtype=torch.int32)  # Max possible kernel size
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
 
-        # Gymnasium interface
-        self._max_steps = env_config.max_steps
+        self.max_steps = env_config.max_steps
         self._step_count = 0
 
-        self.reward_function = env_config.reward_function
-        self.interval_reward_assignment = env_config.interval_reward_assignment
+        self._reward_function = env_config.reward_function
+        self._interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Box(
             low=-3.0,  # Bounds are a conservative estimate based on ImageNet normalization params
@@ -135,21 +133,20 @@ class ImageExplorationEnv(gym.Env):
         if seed != None:
             super().reset(seed=seed)
 
-        # Clear episode variables
+        self.__sensor_pos = torch.stack([
+            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32),
+            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32)
+        ], dim=1)
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
-        max_kernel_size = self.img_height - self.sensor_height + 1
         self._sampled_kernel_size_mask = torch.full_like(
             self.img,
-            fill_value=max_kernel_size,
+            fill_value=self.img_height // self.sensor_height,  # Max possible kernel size
             dtype=torch.int32
         )
+        self._kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
         self._step_count = 0
 
-        action = self.action_space.sample()
-        action = torch.from_numpy(action)
-        action = self._denormalize_action(action)
-        self.move(action)
-
+        self._update_sampled_img()  # Initial env observation is without movement
         observation = self._get_obs()
         info = self._get_info()
 
@@ -162,13 +159,13 @@ class ImageExplorationEnv(gym.Env):
         self.move(action)
         observation = self._get_obs()
 
-        if self._step_count % self.interval_reward_assignment == 0:
-            reward = self.reward_function(self.img, self.sampled_img)
+        if self._step_count % self._interval_reward_assignment == 0:
+            reward = self._reward_function(self.img, self.sampled_img)
 
         else:
             reward = float(0)
 
-        terminated = self._step_count >= self._max_steps
+        terminated = self._step_count >= self.max_steps
         self._step_count += 1
 
         truncated = False
@@ -187,20 +184,19 @@ class ImageExplorationEnv(gym.Env):
 
     @property
     def fov_bbox(self) -> torch.Tensor:
-        """Returns fov positions in top left bottom right format stacked over batch"""
+        """Returns fov positions in top left bottom right format stacked over batch. Depends on current kernel size"""
 
-        fov_size = self._kernel_size - 1
-        sensor_size = torch.tensor((self.sensor_height, self.sensor_width), dtype=torch.int32)
-        offset = torch.cat((fov_size.reshape(-1, 1), fov_size.reshape(-1, 1)), dim=1).to(self.device)
-        bottom_right = sensor_size + offset
-        fov_bbox = torch.cat((self._sensor_pos, self._sensor_pos + bottom_right), dim=1)
+        offset = torch.stack((self.sensor_height * self._kernel_size, self.sensor_width * self._kernel_size), dim=1)
+        bottom_right = self._sensor_pos + offset
+
+        fov_bbox = torch.cat((self._sensor_pos, bottom_right), dim=1)
 
         return fov_bbox
 
     @property
-    def _sensor_max_pos(self) -> torch.Tensor:
+    def sensor_max_pos_from_kernel_size(self) -> torch.Tensor:
         """
-        Computes the maximum valid position for the sensor based on the current FoV.
+        Computes the maximum valid position for the sensor based on the current FoV (dependent on kernel size).
 
         """
         fov_bbox = self.fov_bbox
@@ -211,17 +207,20 @@ class ImageExplorationEnv(gym.Env):
         # print(f"FoV height: {fov_height}")
         # print(f"FoV width: {fov_width}")
 
-        sensor_max_height = self.img_height - fov_height
-        sensor_max_width = self.img_width - fov_width
-        # print(f"sensor_max_height: {sensor_max_height}")
-        # print(f"sensor_max_width: {sensor_max_width}")
+        sensor_max_height_pos = self.img_height - fov_height
+        sensor_max_width_pos = self.img_width - fov_width
+        # print(f"sensor_max_height_pos: {sensor_max_height_pos}")
+        # print(f"sensor_max_width_pos: {sensor_max_width_pos}")
+        sensor_max_pos = torch.tensor([[self.img_height - self.sensor_height, self.img_width - self.sensor_width]] * self.batch_size, dtype=torch.int32)
 
-        sensor_max_pos = torch.cat((sensor_max_height.reshape(-1, 1), sensor_max_width.reshape(-1, 1)), dim=1)
+        sensor_pos = torch.cat((sensor_max_height_pos.reshape(-1, 1), sensor_max_width_pos.reshape(-1, 1)), dim=1)
+        sensor_pos = torch.clamp(sensor_pos, min=self._sensor_min_pos, max=sensor_max_pos)
 
-        # assert torch.all(sensor_max_pos[:, 0] <= self.img_height), "Sensor max height can't be greater than img height"
-        # assert torch.all(sensor_max_pos[:, 1] <= self.img_width), "Sensor max width can't be greater than img width"
+        assert torch.all(sensor_pos[:, 0] <= self.img_height), "Sensor max height can't be greater than img height"
+        assert torch.all(sensor_pos[:, 1] <= self.img_width), "Sensor max width can't be greater than img width"
+        assert torch.all(sensor_pos >= self._sensor_min_pos), "Sensor max position can't be less than min position"
 
-        return sensor_max_pos
+        return sensor_pos
 
     @property
     def _sensor_pos(self) -> torch.Tensor:
@@ -234,12 +233,20 @@ class ImageExplorationEnv(gym.Env):
         Sets the sensor position, ensuring it stays within valid bounds.
         """
 
-        # assert torch.all(self._sensor_max_pos >= self._sensor_min_pos), "Sensor max position can't be less than min position"
         # print(f"New pos before clamping: {new_position}")
-        new_position = torch.clamp(new_position, min=self._sensor_min_pos, max=self._sensor_max_pos)
+        new_position = torch.clamp(new_position, min=self._sensor_min_pos, max=self.sensor_max_pos_from_kernel_size)
         # print(f"New pos after clamping: {new_position}")
 
         self.__sensor_pos = new_position
+
+    @property
+    def max_kernel_size_from_sensor_pos(self) -> torch.Tensor:
+        max_kernel_h_from_pos = (self.img_height - self._sensor_pos[:, 0]) // self.sensor_height
+        max_kernel_w_from_pos = (self.img_width - self._sensor_pos[:, 1]) // self.sensor_width
+        kernel_size = torch.minimum(max_kernel_h_from_pos, max_kernel_w_from_pos)
+        kernel_size = make_kernel_size_odd(kernel_size)
+
+        return kernel_size
 
     @property
     def _kernel_size(self) -> torch.Tensor:
@@ -249,14 +256,12 @@ class ImageExplorationEnv(gym.Env):
     @_kernel_size.setter
     def _kernel_size(self, new_kernel_size: torch.Tensor) -> None:
         # print(f"Previous kernel size: {self._kernel_size}")
-        max_kernel_size_from_sensor_pos = torch.minimum(self.img_height - self._sensor_pos[:, 0], self.img_width - self._sensor_pos[:, 1])
-        max_kernel_size_from_sensor_pos = make_kernel_size_odd(max_kernel_size_from_sensor_pos)
 
-        new_kernel_size = torch.clamp(new_kernel_size, min=self._min_kernel_size, max=max_kernel_size_from_sensor_pos)
+        new_kernel_size = torch.clamp(new_kernel_size, min=self._min_kernel_size, max=self.max_kernel_size_from_sensor_pos)
         new_kernel_size = make_kernel_size_odd(new_kernel_size)
         # print(f"New kernel size: {new_kernel_size}")
 
-        # assert torch.all(new_kernel_size > 0), "All values of new kernel size must be greater than 0"
+        assert torch.all(new_kernel_size > 0), "All values of new kernel size must be greater than 0"
 
         self.__kernel_size = new_kernel_size
 
@@ -272,6 +277,10 @@ class ImageExplorationEnv(gym.Env):
         Returns:
             torch.Tensor: A blurred tensor with the same shape as the input window.
         """
+
+        if window.shape[1] == 0 or window.shape[2] == 0:
+            raise ValueError(f"Invalid window shape: {window.shape}")
+
         padding = int(kernel_size // 2)
         window_padded = F.pad(window, (padding, padding, padding, padding), mode="reflect")
         blurred = F.avg_pool2d(window_padded, kernel_size=kernel_size, stride=1, padding=0)
