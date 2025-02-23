@@ -32,7 +32,7 @@ IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 CIFAR10_DIR = EXTERNAL_DATA_DIR / "cifar10/cifar-10-batches-py"
 
 # Random seed setter function
-SEED = 42
+SEED = 84
 # def set_seed(seed: int = SEED):
 #     """Set the random seed for reproducibility across multiple libraries."""
 #     random.seed(seed)

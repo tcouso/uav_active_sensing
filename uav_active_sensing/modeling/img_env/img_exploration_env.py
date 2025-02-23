@@ -37,6 +37,7 @@ class RewardFunction:
 @dataclass
 class ImageExplorationEnvConfig:
     device: str = DEVICE
+    seed: int = SEED
     patch_size: int = 16
     max_steps: int = 30
     interval_reward_assignment: int = 5
@@ -57,7 +58,8 @@ class ImageExplorationEnv(gym.Env):
     def __init__(self, env_config: ImageExplorationEnvConfig) -> None:
         super().__init__()
         self.device = env_config.device
-        self.generator = torch.Generator(device=self.device).manual_seed(SEED)
+        self.seed = env_config.seed
+        self.generator = torch.Generator(device=self.device).manual_seed(self.seed)
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
         self.batch_size = self.img.shape[0]
@@ -96,14 +98,14 @@ class ImageExplorationEnv(gym.Env):
             high=3.0,
             shape=(self.batch_size, 3, 224, 224),
             dtype=np.float32,
-            seed=SEED
+            seed=self.seed
         )
 
         self.action_space = spaces.Box(
             low=np.tile(np.array([-1, -1, -1], dtype=np.float32), (self.batch_size, 1)),
             high=np.tile(np.array([1, 1, 1], dtype=np.float32), (self.batch_size, 1)),
             dtype=np.float32,
-            seed=SEED
+            seed=self.seed
         )
 
     def _get_obs(self) -> np.ndarray:

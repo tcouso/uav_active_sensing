@@ -1,0 +1,15 @@
+artifact_uri: file:///home/tcouso/uav_active_sensing/mlruns/943175431597795456/dd858755838041348ff6ced2276b86b4/artifacts
+end_time: 1740301677987
+entry_point_name: ''
+experiment_id: '943175431597795456'
+lifecycle_stage: active
+run_id: dd858755838041348ff6ced2276b86b4
+run_name: adaptable-flea-512
+run_uuid: dd858755838041348ff6ced2276b86b4
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1740301619981
+status: 4
+tags: []
+user_id: tcouso

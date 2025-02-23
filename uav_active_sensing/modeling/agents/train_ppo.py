@@ -2,6 +2,7 @@ import typer
 import mlflow
 from pathlib import Path
 from dataclasses import dataclass
+from loguru import logger
 
 import torch
 from torch.utils.data import DataLoader
@@ -18,15 +19,19 @@ from uav_active_sensing.config import DEVICE, SEED
 from dataclasses import dataclass
 
 # TODO: Implement a callback for tracking methics and logging them on SB3
+
+
 class MLflowCallback(BaseCallback):
-    def __init__(self, verbose = 0):
+    def __init__(self, verbose=0):
         super().__init__(verbose)
 
     def _on_step(self) -> bool:
         for key, value in self.logger.name_to_value.items():
-            mlflow.loc_metric(key, value, step=self.num_timesteps)
+            mlflow.log_metric(key, value, step=self.num_timesteps)
 
         return True
+
+
 @dataclass
 class PPOConfig:
     policy: str = "CnnPolicy"
@@ -34,6 +39,7 @@ class PPOConfig:
     batch_size: int = None  # Mini-batch size. A factor of n_steps is recommended
     n_epochs: int = 1
     device: str = DEVICE
+    seed: int = SEED
     verbose: int = 1
     policy_kwargs: dict = None  # Additional policy arguments
 
@@ -44,7 +50,7 @@ app = typer.Typer()
 
 @app.command()
 def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_path: Path = None):
-    
+
     training_generator = torch.Generator(device=DEVICE).manual_seed(SEED)
     mlflow.set_experiment("test_ppo_training")
 
@@ -52,10 +58,10 @@ def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_
 
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)  # TODO: Download this in advance
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
-        
+
         # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
-        tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset, 
-                                                batch_size=4, 
+        tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset,
+                                                batch_size=2,
                                                 collate_fn=tiny_imagenet_collate_fn,
                                                 generator=training_generator,
                                                 shuffle=True)
@@ -74,12 +80,10 @@ def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_
             features_extractor_kwargs=dict(features_dim=512),
         )
 
-        # TODO: Implement some experiment monitoring logic (tensorboard, or something of the sort)
-
         ppo_config = PPOConfig(
-            n_steps=env.max_steps * 64,
+            n_steps=env.max_steps * 4,
             batch_size=env.max_steps,  # Ensures one gradient update per learn()
-            policy_kwargs=ppo_agent_policy_kwargs
+            policy_kwargs=ppo_agent_policy_kwargs,
         )
 
         # Log ppo configuration params
@@ -92,23 +96,24 @@ def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_
             policy_kwargs=ppo_config.policy_kwargs,
             verbose=ppo_config.verbose,
             device=ppo_config.device,
+            seed=ppo_config.seed,
             n_steps=ppo_config.n_steps,
             batch_size=ppo_config.batch_size,
             n_epochs=ppo_config.n_epochs,
         )
 
+        logger.info("Starting batch iterations")
         for i, batch in enumerate(tiny_imagenet_train_loader):
             vec_env = ppo_agent.get_env()
             vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=2 * ppo_config.n_steps, progress_bar=False, callback=mlflow_callback)
 
-            mlflow.log_metric(f"batch: {i}")
-            mean_reard = vec_env.env_method("get_mean_reward")[0]
-            # TODO: One grad update per batch
+            mlflow.log_metric(f"batch", i)
+
             if i == 5:
                 break
 
-            print(f"Batch {i} completed")
+            logger.info(f"Batch {i} completed")
 
 
 if __name__ == "__main__":

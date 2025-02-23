@@ -1,0 +1,15 @@
+artifact_uri: file:///home/tcouso/uav_active_sensing/mlruns/943175431597795456/1e05ce8bd640427a85cf271bab4a7bb7/artifacts
+end_time: 1740302318646
+entry_point_name: ''
+experiment_id: '943175431597795456'
+lifecycle_stage: active
+run_id: 1e05ce8bd640427a85cf271bab4a7bb7
+run_name: nervous-ant-470
+run_uuid: 1e05ce8bd640427a85cf271bab4a7bb7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1740302143708
+status: 4
+tags: []
+user_id: tcouso

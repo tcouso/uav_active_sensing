@@ -1,0 +1,15 @@
+artifact_uri: file:///home/tcouso/uav_active_sensing/mlruns/943175431597795456/282b78e5264c46e482c524ad84793e7f/artifacts
+end_time: 1740301541516
+entry_point_name: ''
+experiment_id: '943175431597795456'
+lifecycle_stage: active
+run_id: 282b78e5264c46e482c524ad84793e7f
+run_name: calm-squid-745
+run_uuid: 282b78e5264c46e482c524ad84793e7f
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1740301193685
+status: 4
+tags: []
+user_id: tcouso
