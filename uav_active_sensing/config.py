@@ -33,15 +33,15 @@ CIFAR10_DIR = EXTERNAL_DATA_DIR / "cifar10/cifar-10-batches-py"
 
 # Random seed setter function
 SEED = 42
-def set_seed(seed: int = SEED):
-    """Set the random seed for reproducibility across multiple libraries."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)  # If using multiple GPUs
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+# def set_seed(seed: int = SEED):
+#     """Set the random seed for reproducibility across multiple libraries."""
+#     random.seed(seed)
+#     np.random.seed(seed)
+#     torch.manual_seed(seed)
+#     torch.cuda.manual_seed(seed)
+#     torch.cuda.manual_seed_all(seed)  # If using multiple GPUs
+#     torch.backends.cudnn.deterministic = True
+#     torch.backends.cudnn.benchmark = False
 
 
 # Select device

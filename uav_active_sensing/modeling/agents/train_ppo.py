@@ -3,6 +3,7 @@ import mlflow
 from pathlib import Path
 from dataclasses import dataclass
 
+import torch
 from torch.utils.data import DataLoader
 from transformers import AutoImageProcessor
 from stable_baselines3 import PPO
@@ -12,7 +13,7 @@ from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagen
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
-from uav_active_sensing.config import DEVICE
+from uav_active_sensing.config import DEVICE, SEED
 
 from dataclasses import dataclass
 
@@ -43,13 +44,21 @@ app = typer.Typer()
 
 @app.command()
 def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_path: Path = None):
-
+    
+    training_generator = torch.Generator(device=DEVICE).manual_seed(SEED)
     mlflow.set_experiment("test_ppo_training")
 
     with mlflow.start_run():
+
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)  # TODO: Download this in advance
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
-        tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset, batch_size=4, collate_fn=tiny_imagenet_collate_fn)
+        
+        # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
+        tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset, 
+                                                batch_size=4, 
+                                                collate_fn=tiny_imagenet_collate_fn,
+                                                generator=training_generator,
+                                                shuffle=True)
 
         # Pretrained model and reward function
         mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")  # TODO: Download this in advance

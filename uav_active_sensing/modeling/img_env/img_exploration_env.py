@@ -8,12 +8,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
-from uav_active_sensing.config import DEVICE, set_seed, SEED
-
-set_seed()
-
-# TODO: Guaratee deterministic behaviour given seed
-
+from uav_active_sensing.config import DEVICE, SEED
 
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
@@ -62,6 +57,7 @@ class ImageExplorationEnv(gym.Env):
     def __init__(self, env_config: ImageExplorationEnvConfig) -> None:
         super().__init__()
         self.device = env_config.device
+        self.generator = torch.Generator(device=self.device).manual_seed(SEED)
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
         self.batch_size = self.img.shape[0]
@@ -75,8 +71,8 @@ class ImageExplorationEnv(gym.Env):
 
         self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
         self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32),
-            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32)
+            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32, generator=self.generator),
+            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32, generator=self.generator)
         ], dim=1)
 
         self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
@@ -99,13 +95,15 @@ class ImageExplorationEnv(gym.Env):
             low=-3.0,  # Bounds are a conservative estimate based on ImageNet normalization params
             high=3.0,
             shape=(self.batch_size, 3, 224, 224),
-            dtype=np.float32
+            dtype=np.float32,
+            seed=SEED
         )
 
         self.action_space = spaces.Box(
             low=np.tile(np.array([-1, -1, -1], dtype=np.float32), (self.batch_size, 1)),
             high=np.tile(np.array([1, 1, 1], dtype=np.float32), (self.batch_size, 1)),
             dtype=np.float32,
+            seed=SEED
         )
 
     def _get_obs(self) -> np.ndarray:
@@ -134,8 +132,8 @@ class ImageExplorationEnv(gym.Env):
             super().reset(seed=seed)
 
         self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32),
-            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32)
+            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32, generator=self.generator),
+            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32, generator=self.generator)
         ], dim=1)
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
         self._sampled_kernel_size_mask = torch.full_like(
