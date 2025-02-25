@@ -81,7 +81,7 @@ def train_ppo(dataset_path: Path = None, model_path: Path = None, img_processor_
         )
 
         ppo_config = PPOConfig(
-            n_steps=env.max_steps * 4,
+            n_steps=env.max_steps * 2,
             batch_size=env.max_steps,  # Ensures one gradient update per learn()
             policy_kwargs=ppo_agent_policy_kwargs,
         )
