@@ -1,0 +1,15 @@
+artifact_uri: file:///home/tcouso/uav_active_sensing/mlruns/943175431597795456/49857a6f3aee4ffebfba66ebfdb7c463/artifacts
+end_time: 1740301918506
+entry_point_name: ''
+experiment_id: '943175431597795456'
+lifecycle_stage: active
+run_id: 49857a6f3aee4ffebfba66ebfdb7c463
+run_name: bustling-ape-837
+run_uuid: 49857a6f3aee4ffebfba66ebfdb7c463
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1740301854790
+status: 4
+tags: []
+user_id: tcouso
