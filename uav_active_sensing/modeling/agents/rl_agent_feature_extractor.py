@@ -9,8 +9,9 @@ class CustomResNetFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space, features_dim=512):
         super(CustomResNetFeatureExtractor, self).__init__(observation_space, features_dim)
         resnet = models.resnet18(weights=ResNet18_Weights.DEFAULT)
+        # Freeze the weights
         for param in resnet.parameters():
-            param.requires_grad = False  # Freeze the weights
+            param.requires_grad = False  
         self.resnet = nn.Sequential(*list(resnet.children())[:-1])
 
     def forward(self, observations):
