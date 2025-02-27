@@ -38,8 +38,9 @@ class RewardFunction:
 class ImageExplorationEnvConfig:
     device: str = DEVICE
     seed: int = SEED
+    img_batch_size: int = 1
     patch_size: int = 16
-    max_steps: int = 30
+    steps_until_termination: int = 30
     interval_reward_assignment: int = 5
     v_max_x: int = patch_size * 2
     v_max_y: int = patch_size * 2
@@ -87,7 +88,7 @@ class ImageExplorationEnv(gym.Env):
         self._sampled_kernel_size_mask = torch.full_like(self.img, fill_value=self.img_height // self.sensor_height, dtype=torch.int32)  # Max possible kernel size
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
 
-        self.max_steps = env_config.max_steps
+        self.max_steps = env_config.steps_until_termination
         self._step_count = 0
 
         self._reward_function = env_config.reward_function
