@@ -1,1 +1,0 @@
-{'features_extractor_class': <class 'uav_active_sensing.modeling.agents.rl_agent_feature_extractor.CustomResNetFeatureExtractor'>, 'features_extractor_kwargs': {'features_dim': 512}}

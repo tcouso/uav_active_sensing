@@ -1,15 +1,13 @@
 from pathlib import Path
-
+import torch
+import matplotlib.pyplot as plt
 import typer
 from loguru import logger
 from tqdm import tqdm
+from transformers import ViTMAEForPreTraining
 
 from uav_active_sensing.config import FIGURES_DIR, PROCESSED_DATA_DIR, IMAGENET_MEAN, IMAGENET_STD
-
-import matplotlib.pyplot as plt
-
-import numpy as np
-import torch
+from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 
 # From: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/ViTMAE/ViT_MAE_visualization_demo.ipynb
 
@@ -23,7 +21,52 @@ def show_image(image, title=""):
     return
 
 
-def visualize_reconstruction(pixel_values, sampled_pixel_values, model):
+def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPreTraining, save_path: Path = None, show: bool = True):
+    outputs = model(pixel_values)
+    y = model.unpatchify(outputs.logits)
+    y = torch.einsum('nchw->nhwc', y).detach().cpu()
+
+    # visualize the mask
+    mask = outputs.mask.detach()
+    mask = mask.unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)  # (N, H*W, p*p*3)
+    mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
+    mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
+
+    x = torch.einsum('nchw->nhwc', pixel_values)
+
+    # masked image
+    im_masked = x * (1 - mask)
+
+    # MAE reconstruction pasted with visible patches
+    im_paste = x * (1 - mask) + y * mask
+
+    # make the plt figure larger
+    plt.rcParams['figure.figsize'] = [24, 24]
+
+    plt.subplot(1, 4, 1)
+    show_image(x[0], "original")
+
+    plt.subplot(1, 4, 2)
+    show_image(im_masked[0], "masked")
+
+    plt.subplot(1, 4, 3)
+    show_image(y[0], f"reconstruction (MSE: {outputs.loss:.6f})")
+
+    plt.subplot(1, 4, 4)
+    show_image(im_paste[0], "reconstruction + visible")
+
+    # Save the plot if a path is provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+
+    # Show the plot only if the flag is set
+    if show:
+        plt.show()
+    else:
+        plt.close()  # Close to free memory when not displaying
+
+
+def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_values: torch.Tensor, model: ActViTMAEForPreTraining, save_path: Path = None, show: bool = True):
     # forward pass
     outputs = model(pixel_values, sampled_pixel_values)
     y = model.unpatchify(outputs.logits)
@@ -53,15 +96,23 @@ def visualize_reconstruction(pixel_values, sampled_pixel_values, model):
     show_image(im_masked[0], "masked")
 
     plt.subplot(1, 4, 3)
-    show_image(y[0], "reconstruction")
+    show_image(y[0], f"reconstruction (MSE: {outputs.loss:.6f})")
 
     plt.subplot(1, 4, 4)
     show_image(im_paste[0], "reconstruction + visible")
 
-    plt.show()
+    # Save the plot if a path is provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+
+    # Show the plot only if the flag is set
+    if show:
+        plt.show()
+    else:
+        plt.close()  # Close to free memory when not displaying
 
 
-def visualize_tensor(tensor, batch_idx=0):
+def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = True):
     """
     Visualizes a PyTorch tensor as an image.
     If the tensor has a batch dimension, a specific batch index can be selected.
@@ -91,15 +142,19 @@ def visualize_tensor(tensor, batch_idx=0):
     plt.imshow(tensor.numpy())
     plt.title(f"Tensor (Batch {batch_idx})" if tensor.dim() == 4 else "Tensor")
     plt.axis("off")  # Hide axis
-    plt.show()
+    
+    # Save the plot if a path is provided
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+
+    # Show the plot only if the flag is set
+    if show:
+        plt.show()
+    else:
+        plt.close()  # Close to free memory when not displaying
 
 
 app = typer.Typer()
-
-
-# TODO: Construct plots from tensorboard logs
-
-# TODO: Construct plots from sampling strategies of trained agents
 
 
 @app.command()
