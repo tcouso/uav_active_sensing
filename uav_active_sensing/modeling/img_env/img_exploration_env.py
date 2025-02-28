@@ -44,7 +44,7 @@ class ImageExplorationEnvConfig:
     interval_reward_assignment: int = 5
     v_max_x: int = patch_size * 2
     v_max_y: int = patch_size * 2
-    v_max_z: int = 4
+    v_max_z: int = 2
 
     # Set during execution
     img_sensor_ratio: float = None
@@ -77,6 +77,13 @@ class ImageExplorationEnv(gym.Env):
             torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32, generator=self.generator),
             torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32, generator=self.generator)
         ], dim=1)
+        # max_h = (self.img_height - self.sensor_height) // self.sensor_height + 1
+        # max_w = (self.img_width - self.sensor_width) // self.sensor_width + 1
+
+        # self.__sensor_pos = torch.stack([
+        #     torch.randint(0, max_h, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_height,
+        #     torch.randint(0, max_w, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_width,
+        # ], dim=1)
 
         self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
         self.__kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
@@ -115,7 +122,7 @@ class ImageExplorationEnv(gym.Env):
 
         return obs
 
-    def _get_info(self):  # TODO: Look references of good info to give
+    def _get_info(self):  # TODO: Is there any info that I should be giving?
         info = {}
 
         return info
@@ -153,14 +160,14 @@ class ImageExplorationEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: np.ndarray, eval: bool=False) -> Tuple[np.ndarray, float, bool, bool, dict]:
 
         action = torch.from_numpy(action)
         action = self._denormalize_action(action)
         self.move(action)
         observation = self._get_obs()
 
-        if self._step_count % self._interval_reward_assignment == 0:
+        if (self._step_count % self._interval_reward_assignment == 0) and not eval:
             reward = self._reward_function(self.img, self.sampled_img)
 
         else:
@@ -175,7 +182,7 @@ class ImageExplorationEnv(gym.Env):
         return observation, reward, terminated, truncated, info
 
     def set_img(self, new_img: torch.Tensor) -> None:
-
+        """Exposed setter method for updating images between batches"""
         self.img = new_img
 
     @property

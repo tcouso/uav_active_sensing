@@ -7,7 +7,7 @@ import mlflow
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from transformers import AutoImageProcessor
+from transformers import AutoImageProcessor, ViTMAEForPreTraining
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -17,12 +17,25 @@ from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFuncti
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
 from uav_active_sensing.config import DEVICE, SEED
-
-
-# TODO: Setup PPO config here, and log params in mlflow. The idea could be iterate over a loop of params
-# https://iclr-blog-track.github.io/2022/03/25/ppo-implementation-details/
+from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction, visualize_tensor
 
 app = typer.Typer()
+
+PPO_PARAMS = {
+    'steps_until_termination': 50,
+    'learning_rate': 1e-4,
+    'n_steps': 256,
+    'batch_size': 64,
+    'n_epochs': 1,
+    'clip_range': 0.2,
+    'gamma': 0.99,
+    'policy': 'CnnPolicy',
+    'gae_lambda': 0.95,
+    'ent_coef': 0.0,
+    'vf_coef': 0.5,
+    'device': DEVICE,
+    'seed': SEED,
+}
 
 
 class MLflowOutputFormat(KVWriter):
@@ -49,10 +62,59 @@ class MLflowOutputFormat(KVWriter):
                     mlflow.log_metric(key, value, step)
 
 
-# TODO: Implement an image epoch loop
-def train_ppo(params: dict) -> dict:
+def run_episode_and_visualize_sampling(
+    ppo_agent,
+    env,
+    deterministic: bool,
+    act_mae_model,
+    mae_model,
+    reconstruction_dir,
+    img_index: int,
+):
+    """
+    Runs one episode with the given agent and environment, then visualizes the reconstructions.
 
-    with mlflow.start_run(nested=True):
+    :param ppo_agent: The agent with a `predict` method.
+    :param env: The environment (must implement reset() and step() and provide img attributes).
+    :param deterministic: Whether to use deterministic actions.
+    :param act_mae_model: Model for act_mae reconstruction visualization.
+    :param mae_model: Model for mae reconstruction visualization.
+    :param reconstruction_dir: Directory (e.g., pathlib.Path) where images will be saved.
+    :param img_index: Index used for naming the saved images.
+    """
+    obs, _ = env.reset()
+    state = None
+    done = False
+
+    while not done:
+        actions, state = ppo_agent.predict(
+            obs,
+            state=state,
+            deterministic=deterministic,
+        )
+        obs, _, done, _, _ = env.step(actions, eval=True)
+
+    visualize_act_mae_reconstruction(
+        env.img,
+        env.sampled_img,
+        act_mae_model,
+        show=False,
+        save_path=reconstruction_dir / f"act_mae_reconstruction_img_{img_index}"
+    )
+    visualize_mae_reconstruction(
+        env.img,
+        mae_model,
+        show=False,
+        save_path=reconstruction_dir / f"mae_reconstruction_img_{img_index}"
+    )
+
+
+# TODO: Implement an image epoch loop after hiperparam search
+def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
+    if experiment_name is not None:
+        mlflow.set_experiment(experiment_name)
+
+    with mlflow.start_run(nested=nested):
         mlflow.transformers.autolog(disable=True)
         # mlflow.sklearn.autolog(disable=True)
         mlflow.autolog()
@@ -62,11 +124,15 @@ def train_ppo(params: dict) -> dict:
 
         run_dir = Path(f"mlruns/{experiment_id}/{run_id}")
         artifact_dir = run_dir / "artifacts"
-        models_dir = Path(artifact_dir / "models")
-        logs_dir = Path(artifact_dir / "logs")
+        models_dir = artifact_dir / "models"
+        logs_dir = artifact_dir / "logs"
+        eval_img_reconstruction_dir = artifact_dir / "eval_img_reconstruction_dir"
+        train_img_reconstruction_dir = artifact_dir / "train_img_reconstruction_dir"
 
         models_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
+        eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
+        train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
         torch_generator = torch.Generator(device=DEVICE).manual_seed(SEED)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
@@ -80,13 +146,16 @@ def train_ppo(params: dict) -> dict:
                                                 shuffle=True)
 
         # Pretrained model and reward function
-        mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
-        reward_function = RewardFunction(mae_model)
+        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
+        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
+        reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
         dummy_batch = next(iter(tiny_imagenet_train_loader))
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
-                                               reward_function=reward_function)
+                                               steps_until_termination=params['steps_until_termination'],
+                                               reward_function=reward_function,
+                                               )
         env = ImageExplorationEnv(env_config)
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
@@ -114,8 +183,19 @@ def train_ppo(params: dict) -> dict:
         for i, batch in enumerate(tiny_imagenet_train_loader):
             vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=2 * params['n_steps'], progress_bar=False, log_interval=1)
+            # if i % (len(tiny_imagenet_train_loader.dataset) // 2) == 0:
+            if i % 2 == 0:  # debug
+                run_episode_and_visualize_sampling(
+                    ppo_agent,
+                    env,
+                    deterministic=False,
+                    act_mae_model=act_mae_model,
+                    mae_model=mae_model,
+                    reconstruction_dir=train_img_reconstruction_dir,
+                    img_index=i,
+                )
 
-            if i == 1:  # For debugging
+            if i == 10:  # For debugging
                 break
 
         ppo_agent.save(models_dir / "ppo_model.zip")
@@ -125,7 +205,6 @@ def train_ppo(params: dict) -> dict:
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
         # Evaluation loop
-        # trained_ppo_agent = PPO.load(models_dir / "ppo_model.zip")
         tiny_imagenet_val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
         tiny_imagenet_val_loader = DataLoader(tiny_imagenet_val_dataset,
                                               batch_size=env_config.img_batch_size,
@@ -156,7 +235,16 @@ def train_ppo(params: dict) -> dict:
             reward_list.append(mean_reward)  # Store mean rewards
             val_batch_count += 1
 
-            # TODO: Save some reconstructed images as artifacts, with MSE, and comparison with MAE
+            if i % (len(tiny_imagenet_val_loader.dataset) // 10) == 0:
+                run_episode_and_visualize_sampling(
+                    ppo_agent,
+                    env,
+                    deterministic=True,
+                    act_mae_model=act_mae_model,
+                    mae_model=mae_model,
+                    reconstruction_dir=eval_img_reconstruction_dir,
+                    img_index=i,
+                )
 
             if i == 1:  # For debugging
                 break
@@ -172,24 +260,16 @@ def train_ppo(params: dict) -> dict:
                 "status": STATUS_OK}
 
 
-def mock_objective_function(params):
-    import random
-    total_mean_reward = random.uniform(0, 10)  # Simulating mean reward
-    total_std_reward = random.uniform(0, 0.5)  # Simulating standard deviation
-    val_batch_count = random.randint(1, 10)  # Simulating batch count
-
-    return {
-        'loss': -(total_mean_reward / val_batch_count),
-        'loss_variance': -(total_std_reward / val_batch_count),
-        "status": STATUS_OK
-    }
-
-
 def objective(params: dict) -> dict:
-    result = train_ppo(params)
+    result = train_ppo(params, nested=True)
     # result = mock_objective_function(params)
 
     return result
+
+
+@app.command()
+def ppo_fixed_params(experiment_name: str):
+    train_ppo(PPO_PARAMS, experiment_name)
 
 
 @app.command()
@@ -212,9 +292,9 @@ def ppo_param_search(experiment_name: str) -> None:
         'seed': SEED,
     }
     param_space_debug = {
-        'steps_until_termination': hp.choice('steps_until_termination', [5, 10]),  # Fewer steps
+        'steps_until_termination': hp.choice('steps_until_termination', [10, 20, 30]),  # Fewer steps
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-4), np.log(5e-4)),  # Higher floor, smaller range
-        'n_steps': hp.choice('n_steps', [8, 16]),  # Much smaller update steps
+        'n_steps': hp.choice('n_steps', [30, 40, 50]),  # Much smaller update steps
         'batch_size': hp.choice('batch_size', [8, 16]),  # Smaller batch sizes
         'n_epochs': hp.choice('n_epochs', [1, 2]),  # Fewer epochs
         'clip_range': hp.uniform('clip_range', 0.2, 0.3),  # Keep range small
@@ -224,7 +304,7 @@ def ppo_param_search(experiment_name: str) -> None:
         'ent_coef': 0.0,
         'vf_coef': 0.2,  # Reduce value function coefficient to prioritize speed
         'device': 'cpu',  # Force CPU for debugging
-        'seed': 42,  # Fixed seed for reproducibility
+        'seed': SEED,  # Fixed seed for reproducibility
     }
     with mlflow.start_run():
         # Conduct the hyperparameter search using Hyperopt
@@ -251,4 +331,5 @@ def ppo_param_search(experiment_name: str) -> None:
 
 
 if __name__ == "__main__":
+    # Remember to start server in cli from root dir: ```mlflow server --host 0.0.0.0 --port 5000```
     app()
