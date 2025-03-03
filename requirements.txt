@@ -47,6 +47,7 @@ fonttools==4.55.6
 fqdn==1.5.1
 frozenlist==1.5.0
 fsspec==2024.2.0
+future==1.0.0
 gitdb==4.0.12
 GitPython==3.1.44
 google-api-core==2.24.1
@@ -64,6 +65,7 @@ httpcore==1.0.7
 httptools==0.6.4
 httpx==0.28.1
 huggingface-hub==0.28.1
+hyperopt==0.2.7
 idna==3.10
 importlib_metadata==8.5.0
 ipykernel==6.29.5
@@ -140,6 +142,7 @@ psutil==6.1.1
 ptyprocess==0.7.0
 pure_eval==0.2.3
 py-spy==0.4.0
+py4j==0.10.9.9
 pyarrow==18.1.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
@@ -201,7 +204,7 @@ typer==0.15.1
 types-python-dateutil==2.9.0.20241206
 typing_extensions==4.12.2
 tzdata==2025.1
--e git+https://github.com/tcouso/uav_active_sensing.git@e5dc535ae7e4e177107de2c2e8d22c2aef3a5c7f#egg=uav_active_sensing
+-e git+https://github.com/tcouso/uav_active_sensing.git@27c12bb04509972951f107051db792844753604c#egg=uav_active_sensing
 uri-template==1.3.0
 urllib3==2.3.0
 uvicorn==0.34.0
