@@ -1,4 +1,5 @@
 import typer
+import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
@@ -6,7 +7,7 @@ from typing import Dict, Union, Any, Tuple
 import mlflow
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from transformers import AutoImageProcessor, ViTMAEForPreTraining
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
@@ -17,7 +18,7 @@ from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFuncti
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
 from uav_active_sensing.config import DEVICE, SEED
-from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction, visualize_tensor
+from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction
 
 app = typer.Typer()
 
@@ -36,6 +37,17 @@ PPO_PARAMS = {
     'device': DEVICE,
     'seed': SEED,
 }
+
+
+class SingleImageDataset(Dataset):
+    def __init__(self, original_dataset: Dataset, index: int):
+        self.image, self.label = original_dataset[index]
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, idx):
+        return self.image, self.label
 
 
 class MLflowOutputFormat(KVWriter):
@@ -138,8 +150,12 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
 
+        # Single image experiment debugging
+        random_index = rd.randint(0, len(tiny_imagenet_train_dataset) - 1)
+        single_image_dataset = SingleImageDataset(tiny_imagenet_train_dataset, random_index)
+
         # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
-        tiny_imagenet_train_loader = DataLoader(tiny_imagenet_train_dataset,
+        dataloader = DataLoader(single_image_dataset,
                                                 batch_size=1,
                                                 collate_fn=tiny_imagenet_collate_fn,
                                                 generator=torch_generator,
@@ -151,7 +167,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
-        dummy_batch = next(iter(tiny_imagenet_train_loader))
+        dummy_batch = next(iter(dataloader))
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
                                                steps_until_termination=params['steps_until_termination'],
                                                reward_function=reward_function,
@@ -180,7 +196,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(loggers)
         vec_env = ppo_agent.get_env()
-        for i, batch in enumerate(tiny_imagenet_train_loader):
+        for i, batch in enumerate(dataloader):
             vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=2 * params['n_steps'], progress_bar=False, log_interval=1)
             # if i % (len(tiny_imagenet_train_loader.dataset) // 2) == 0:
