@@ -25,7 +25,7 @@ REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 
 TINY_IMAGENET_URL = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
-TINY_IMAGENET_DIR = EXTERNAL_DATA_DIR /  "tiny_imagenet/tiny-imagenet-200"
+# TINY_IMAGENET_DIR = EXTERNAL_DATA_DIR /  "tiny_imagenet/tiny-imagenet-200"
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
 IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 

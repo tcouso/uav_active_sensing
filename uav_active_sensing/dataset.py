@@ -6,14 +6,13 @@ import requests
 import zipfile
 from torchvision import datasets
 
-from uav_active_sensing.config import TINY_IMAGENET_DIR, TINY_IMAGENET_URL, CIFAR10_DIR
+from uav_active_sensing.config import TINY_IMAGENET_URL, EXTERNAL_DATA_DIR
 app = typer.Typer()
 
 
 
 def download_and_extract_tiny_imagenet(target_dir: Path):
     """Downloads and extracts the Tiny ImageNet dataset."""
-    target_dir.mkdir(parents=True, exist_ok=True)
     zip_path = target_dir / "tiny-imagenet-200.zip"
 
     if not zip_path.exists():
@@ -41,13 +40,13 @@ def download_and_extract_tiny_imagenet(target_dir: Path):
 def main():
 
     # Download CIFAR-10
-    datasets.CIFAR10(root=CIFAR10_DIR, train=True, download=True)
-    datasets.CIFAR10(root=CIFAR10_DIR, train=False, download=True)
-    logger.info(f"CIFAR-10 datasets have been downloaded and stored in {CIFAR10_DIR}")
+    datasets.CIFAR10(root=EXTERNAL_DATA_DIR, train=True, download=True)
+    datasets.CIFAR10(root=EXTERNAL_DATA_DIR, train=False, download=True)
+    logger.info(f"CIFAR-10 datasets have been downloaded and stored in {EXTERNAL_DATA_DIR}")
 
     # Download and extract Tiny ImageNet
-    download_and_extract_tiny_imagenet(TINY_IMAGENET_DIR)
-    logger.info(f"Tiny ImageNet dataset has been downloaded and processed in {TINY_IMAGENET_DIR}")
+    download_and_extract_tiny_imagenet(EXTERNAL_DATA_DIR)
+    logger.info(f"Tiny ImageNet dataset has been downloaded and processed in {EXTERNAL_DATA_DIR}")
 
 
 if __name__ == "__main__":
