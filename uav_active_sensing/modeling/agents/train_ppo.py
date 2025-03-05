@@ -146,7 +146,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
         train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
-        torch_generator = torch.Generator(device=DEVICE).manual_seed(SEED)
+        torch_generator = torch.Generator().manual_seed(SEED)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
 
@@ -162,8 +162,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                                 shuffle=True)
 
         # Pretrained model and reward function
-        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
-        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
+        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
+        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
         reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
@@ -319,7 +319,7 @@ def ppo_param_search(experiment_name: str) -> None:
         'gae_lambda': 0.8,  # Lower GAE lambda for faster updates
         'ent_coef': 0.0,
         'vf_coef': 0.2,  # Reduce value function coefficient to prioritize speed
-        'device': 'cpu',  # Force CPU for debugging
+        'device': DEVICE,
         'seed': SEED,  # Fixed seed for reproducibility
     }
     with mlflow.start_run():

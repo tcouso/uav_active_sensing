@@ -32,7 +32,7 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
     mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
 
-    x = torch.einsum('nchw->nhwc', pixel_values)
+    x = torch.einsum('nchw->nhwc', pixel_values).detach().cpu()
 
     # masked image
     im_masked = x * (1 - mask)
@@ -78,7 +78,7 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_v
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
     mask = torch.einsum("nchw->nhwc", mask).detach().cpu()
 
-    x = torch.einsum("nchw->nhwc", pixel_values)
+    x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
 
     # masked image
     im_masked = x * (1 - mask)
@@ -142,7 +142,7 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
     plt.imshow(tensor.numpy())
     plt.title(f"Tensor (Batch {batch_idx})" if tensor.dim() == 4 else "Tensor")
     plt.axis("off")  # Hide axis
-    
+
     # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")

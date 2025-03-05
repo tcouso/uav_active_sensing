@@ -60,7 +60,7 @@ class ImageExplorationEnv(gym.Env):
         super().__init__()
         self.device = env_config.device
         self.seed = env_config.seed
-        self.generator = torch.Generator(device=self.device).manual_seed(self.seed)
+        self.generator = torch.Generator().manual_seed(self.seed)
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
         self.batch_size = self.img.shape[0]
@@ -118,7 +118,7 @@ class ImageExplorationEnv(gym.Env):
 
     def _get_obs(self) -> np.ndarray:
 
-        obs = torch.nan_to_num(self.sampled_img, nan=0.0).detach().numpy()
+        obs = torch.nan_to_num(self.sampled_img, nan=0.0).cpu().numpy()
 
         return obs
 
