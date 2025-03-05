@@ -25,15 +25,15 @@ app = typer.Typer()
 
 PPO_PARAMS = {
     'steps_until_termination': 50,
-    'learning_rate': 3e-4,
+    'learning_rate': 3e-5,
     'n_steps': 2048,
-    'batch_size': 128,
+    'batch_size': 256,
     'n_epochs': 10,
     'clip_range': 0.2,
     'gamma': 0.99,
     'policy': 'CnnPolicy',
     'gae_lambda': 0.95,
-    'ent_coef': 0.0,
+    'ent_coef': 0.05,
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': SEED,
@@ -210,8 +210,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                 shuffle=True)
 
         # Pretrained model and reward function
-        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda() if DEVICE == "cuda" else ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
-        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda() if DEVICE == "cuda" else ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
+        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
+        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
         reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
