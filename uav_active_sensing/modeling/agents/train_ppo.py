@@ -163,9 +163,9 @@ class ImgReconstructinoCallback(BaseCallback):
                 act_mae_model=self.act_mae_model,
                 mae_model=self.mae_model,
                 reconstruction_dir=self.reconstruction_dir,
-                img_index=self.img_index,
+                img_index=self._img_index,
             )
-            self.img_index += 1
+            self._img_index += 1
         return True
 
 
@@ -210,8 +210,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                 shuffle=True)
 
         # Pretrained model and reward function
-        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
-        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
+        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda() if DEVICE == "cuda" else ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
+        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda() if DEVICE == "cuda" else ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
         reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
