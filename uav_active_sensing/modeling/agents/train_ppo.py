@@ -12,6 +12,7 @@ from transformers import AutoImageProcessor, ViTMAEForPreTraining
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
 from stable_baselines3.common.evaluation import evaluate_policy
+from stable_baselines3.common.callbacks import BaseCallback
 
 from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagenet_collate_fn
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
@@ -39,6 +40,7 @@ PPO_PARAMS = {
 }
 
 
+# Debugging dataset for single image experiment
 class SingleImageDataset(Dataset):
     def __init__(self, original_dataset: Dataset, index: int):
         self.image, self.label = original_dataset[index]
@@ -48,6 +50,19 @@ class SingleImageDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.image, self.label
+
+
+class ImgReconstructinoCallback(BaseCallback):
+
+    def __init__(self, img_reconstruction_period: int):
+        super().__init__()
+        self.img_reconstruction_period: int = img_reconstruction_period
+
+    def _on_step(self) -> True:
+        if self.num_timesteps % self.img_reconstruction_period == 0:
+            # Image reconstruction
+            pass
+        return True
 
 
 class MLflowOutputFormat(KVWriter):
@@ -121,6 +136,39 @@ def run_episode_and_visualize_sampling(
     )
 
 
+class ImgReconstructinoCallback(BaseCallback):
+    def __init__(self, img_reconstruction_period: int,
+                 env: ImageExplorationEnv,
+                 act_mae_model: ActViTMAEForPreTraining,
+                 mae_model: ViTMAEForPreTraining,
+                 reconstruction_dir: Path,
+                 deterministic: bool = False):
+
+        super().__init__()
+        self.img_reconstruction_period: int = img_reconstruction_period
+        self.env = env
+        self.act_mae_model = act_mae_model
+        self.mae_model = mae_model
+        self.reconstruction_dir = reconstruction_dir
+        self.deterministic = deterministic
+        self._img_index = 0
+
+    def _on_step(self) -> True:
+        if self.num_timesteps % self.img_reconstruction_period == 0:
+            # Image reconstruction
+            run_episode_and_visualize_sampling(
+                ppo_agent=self.model,
+                env=self.env,
+                deterministic=self.deterministic,
+                act_mae_model=self.act_mae_model,
+                mae_model=self.mae_model,
+                reconstruction_dir=self.reconstruction_dir,
+                img_index=self.img_index,
+            )
+            self.img_index += 1
+        return True
+
+
 # TODO: Implement an image epoch loop after hiperparam search
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
     if experiment_name is not None:
@@ -156,10 +204,10 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
         dataloader = DataLoader(single_image_dataset,
-                                                batch_size=1,
-                                                collate_fn=tiny_imagenet_collate_fn,
-                                                generator=torch_generator,
-                                                shuffle=True)
+                                batch_size=1,
+                                collate_fn=tiny_imagenet_collate_fn,
+                                generator=torch_generator,
+                                shuffle=True)
 
         # Pretrained model and reward function
         mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
@@ -177,7 +225,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(features_dim=512),
         )
-
+        img_reconstruction_callback = ImgReconstructinoCallback(
+            img_reconstruction_period=10_000,
+            env=env,
+            act_mae_model=act_mae_model,
+            mae_model=mae_model,
+            reconstruction_dir=train_img_reconstruction_dir,
+        )
         ppo_agent = PPO(
             params['policy'],
             env,
@@ -199,18 +253,18 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         vec_env = ppo_agent.get_env()
         for i, batch in enumerate(dataloader):
             vec_env.env_method("set_img", batch)
-            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1)
+            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
             # if i % (len(tiny_imagenet_train_loader.dataset) // 2) == 0:
-            if i % 2 == 0:  # debug
-                run_episode_and_visualize_sampling(
-                    ppo_agent,
-                    env,
-                    deterministic=False,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    reconstruction_dir=train_img_reconstruction_dir,
-                    img_index=i,
-                )
+            # if i % 2 == 0:  # debug
+            #     run_episode_and_visualize_sampling(
+            #         ppo_agent,
+            #         env,
+            #         deterministic=False,
+            #         act_mae_model=act_mae_model,
+            #         mae_model=mae_model,
+            #         reconstruction_dir=train_img_reconstruction_dir,
+            #         img_index=i,
+            #     )
 
             if i == 10:  # For debugging
                 break
@@ -262,6 +316,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                     reconstruction_dir=eval_img_reconstruction_dir,
                     img_index=i,
                 )
+            if i == 0:  # single iteration for debugging
+                break
 
         val_mean_reward = total_mean_reward / val_batch_count
         val_std_reward = np.std(reward_list, ddof=1) if val_batch_count > 1 else 0
