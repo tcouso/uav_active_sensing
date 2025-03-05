@@ -44,7 +44,7 @@ class ImageExplorationEnvConfig:
     interval_reward_assignment: int = 5
     v_max_x: int = patch_size * 2
     v_max_y: int = patch_size * 2
-    v_max_z: int = 2
+    v_max_z: int = 0
 
     # Set during execution
     img_sensor_ratio: float = None

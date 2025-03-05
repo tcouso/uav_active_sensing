@@ -24,10 +24,10 @@ app = typer.Typer()
 
 PPO_PARAMS = {
     'steps_until_termination': 50,
-    'learning_rate': 1e-4,
-    'n_steps': 256,
-    'batch_size': 64,
-    'n_epochs': 1,
+    'learning_rate': 3e-4,
+    'n_steps': 2048,
+    'batch_size': 128,
+    'n_epochs': 10,
     'clip_range': 0.2,
     'gamma': 0.99,
     'policy': 'CnnPolicy',
@@ -187,6 +187,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_steps=params['n_steps'],
             batch_size=params['batch_size'],
             n_epochs=params['n_epochs'],
+            verbose=1
         )
         mlflow.log_params(params)
 
@@ -198,7 +199,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         vec_env = ppo_agent.get_env()
         for i, batch in enumerate(dataloader):
             vec_env.env_method("set_img", batch)
-            ppo_agent.learn(total_timesteps=2 * params['n_steps'], progress_bar=False, log_interval=1)
+            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1)
             # if i % (len(tiny_imagenet_train_loader.dataset) // 2) == 0:
             if i % 2 == 0:  # debug
                 run_episode_and_visualize_sampling(
@@ -262,9 +263,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                     img_index=i,
                 )
 
-            if i == 1:  # For debugging
-                break
-
         val_mean_reward = total_mean_reward / val_batch_count
         val_std_reward = np.std(reward_list, ddof=1) if val_batch_count > 1 else 0
 
@@ -327,7 +325,7 @@ def ppo_param_search(experiment_name: str) -> None:
         trials = Trials()
         best = fmin(
             fn=objective,
-            space=param_space_debug,
+            space=param_space,
             algo=tpe.suggest,
             max_evals=2,
             trials=trials,
