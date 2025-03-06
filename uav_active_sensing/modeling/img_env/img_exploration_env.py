@@ -39,11 +39,11 @@ class ImageExplorationEnvConfig:
     device: str = DEVICE
     seed: int = SEED
     img_batch_size: int = 1
-    patch_size: int = 16
+    patch_size: int = 2 * 16
     steps_until_termination: int = 30
     interval_reward_assignment: int = 5
-    v_max_x: int = patch_size * 2
-    v_max_y: int = patch_size * 2
+    v_max_x: int = patch_size
+    v_max_y: int = patch_size
     v_max_z: int = 0
 
     # Set during execution

@@ -19,7 +19,7 @@ from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFuncti
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
 from uav_active_sensing.config import DEVICE, SEED
-from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction
+from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction, visualize_tensor
 
 app = typer.Typer()
 
@@ -165,6 +165,8 @@ class ImgReconstructinoCallback(BaseCallback):
                 reconstruction_dir=self.reconstruction_dir,
                 img_index=self._img_index,
             )
+            visualize_tensor(self.env.sampled_img, show=False, save_path=self.reconstruction_dir / f"sampled_img_{self._img_index}")
+
             self._img_index += 1
         return True
 
@@ -266,9 +268,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             #         img_index=i,
             #     )
 
-            if i == 10:  # For debugging
-                break
-
+#            if i == 10:  # For debugging
+#                break
+#
         ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry

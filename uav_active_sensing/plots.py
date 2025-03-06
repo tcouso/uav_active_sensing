@@ -139,7 +139,7 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
 
     # Plot the tensor as an image
     plt.figure(figsize=(6, 6))
-    plt.imshow(tensor.numpy())
+    plt.imshow(tensor.cpu().numpy())
     plt.title(f"Tensor (Batch {batch_idx})" if tensor.dim() == 4 else "Tensor")
     plt.axis("off")  # Hide axis
 
