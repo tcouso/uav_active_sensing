@@ -39,6 +39,22 @@ PPO_PARAMS = {
     'seed': SEED,
 }
 
+PPO_PARAMS_DEBUG = {
+    'steps_until_termination': 50,
+    'learning_rate': 3e-5,
+    'n_steps': 64,
+    'batch_size': 16,
+    'n_epochs': 10,
+    'clip_range': 0.2,
+    'gamma': 0.99,
+    'policy': 'CnnPolicy',
+    'gae_lambda': 0.95,
+    'ent_coef': 0.05,
+    'vf_coef': 0.5,
+    'device': DEVICE,
+    'seed': SEED,
+}
+
 
 # Debugging dataset for single image experiment
 class SingleImageDataset(Dataset):
@@ -90,13 +106,13 @@ class MLflowOutputFormat(KVWriter):
 
 
 def run_episode_and_visualize_sampling(
-    ppo_agent,
-    env,
+    ppo_agent: PPO,
+    env: ImageExplorationEnv,
     deterministic: bool,
-    act_mae_model,
-    mae_model,
-    reconstruction_dir,
+    act_mae_model: ActViTMAEForPreTraining,
+    reconstruction_dir: Path,
     img_index: int,
+    mae_model: ViTMAEForPreTraining = None,
 ):
     """
     Runs one episode with the given agent and environment, then visualizes the reconstructions.
@@ -128,12 +144,13 @@ def run_episode_and_visualize_sampling(
         show=False,
         save_path=reconstruction_dir / f"act_mae_reconstruction_img_{img_index}"
     )
-    visualize_mae_reconstruction(
-        env.img,
-        mae_model,
-        show=False,
-        save_path=reconstruction_dir / f"mae_reconstruction_img_{img_index}"
-    )
+    if mae_model is not None:
+        visualize_mae_reconstruction(
+            env.img,
+            mae_model,
+            show=False,
+            save_path=reconstruction_dir / f"mae_reconstruction_img_{img_index}"
+        )
 
 
 class ImgReconstructinoCallback(BaseCallback):
@@ -161,11 +178,10 @@ class ImgReconstructinoCallback(BaseCallback):
                 env=self.env,
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
-                mae_model=self.mae_model,
+                # mae_model=self.mae_model,
                 reconstruction_dir=self.reconstruction_dir,
                 img_index=self._img_index,
             )
-            visualize_tensor(self.env.sampled_img, show=False, save_path=self.reconstruction_dir / f"sampled_img_{self._img_index}")
 
             self._img_index += 1
         return True
@@ -212,8 +228,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                 shuffle=True)
 
         # Pretrained model and reward function
-        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
-        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").cuda()
+        mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").to(DEVICE)
+        act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").to(DEVICE)
         reward_function = RewardFunction(act_mae_model)
 
         # Take one image as a dummy input for env initialization
@@ -228,7 +244,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             features_extractor_kwargs=dict(features_dim=512),
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=10_000,
+            img_reconstruction_period=5,
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -253,24 +269,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(loggers)
         vec_env = ppo_agent.get_env()
+
         for i, batch in enumerate(dataloader):
             vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
-            # if i % (len(tiny_imagenet_train_loader.dataset) // 2) == 0:
-            # if i % 2 == 0:  # debug
-            #     run_episode_and_visualize_sampling(
-            #         ppo_agent,
-            #         env,
-            #         deterministic=False,
-            #         act_mae_model=act_mae_model,
-            #         mae_model=mae_model,
-            #         reconstruction_dir=train_img_reconstruction_dir,
-            #         img_index=i,
-            #     )
 
-#            if i == 10:  # For debugging
-#                break
-#
         ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry
@@ -318,6 +321,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                     reconstruction_dir=eval_img_reconstruction_dir,
                     img_index=i,
                 )
+            
             if i == 0:  # single iteration for debugging
                 break
 
@@ -334,7 +338,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
 def objective(params: dict) -> dict:
     result = train_ppo(params, nested=True)
-    # result = mock_objective_function(params)
 
     return result
 
