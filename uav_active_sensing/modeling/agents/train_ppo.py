@@ -24,7 +24,7 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 50,
+    'steps_until_termination': 15,
     'learning_rate': 3e-5,
     'n_steps': 2048,
     'batch_size': 256,
