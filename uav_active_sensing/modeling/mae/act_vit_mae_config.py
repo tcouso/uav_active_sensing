@@ -21,8 +21,6 @@ from dataclasses import dataclass
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
-from uav_active_sensing.config import SEED
-
 logger = logging.get_logger(__name__)
 
 
@@ -170,7 +168,7 @@ class ActViTMAETrainingConfig:
     save_total_limit: int = 3
 
     # Randomness and reproducibility
-    seed: int = SEED
+    seed: int = None
 
 
 

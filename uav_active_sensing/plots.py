@@ -89,8 +89,6 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_v
     # MAE reconstruction pasted with visible patches
     im_paste = x * (1 - mask) + y * mask
 
-    print(x.shape)
-    print(im_sampled.shape)
     # make the plt figure larger
     plt.rcParams["figure.figsize"] = [24, 24]
 
