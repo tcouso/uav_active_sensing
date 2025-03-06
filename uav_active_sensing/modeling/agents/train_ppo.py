@@ -19,7 +19,7 @@ from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFuncti
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
 from uav_active_sensing.config import DEVICE, SEED
-from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction, visualize_tensor
+from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction
 
 app = typer.Typer()
 
@@ -56,7 +56,18 @@ PPO_PARAMS_DEBUG = {
 }
 
 
+class RandomAgent:
+    def __init__(self, env: ImageExplorationEnv):
+        self.action_space = env.action_space
+
+    def predict(self, obs, deterministic=False):
+        _, _ = obs, deterministic  # Dummy inputs
+
+        return self.action_space.sample(), None
+
 # Debugging dataset for single image experiment
+
+
 class SingleImageDataset(Dataset):
     def __init__(self, original_dataset: Dataset, index: int):
         self.image, self.label = original_dataset[index]
@@ -111,28 +122,19 @@ def run_episode_and_visualize_sampling(
     deterministic: bool,
     act_mae_model: ActViTMAEForPreTraining,
     reconstruction_dir: Path,
+    filename: str,
     img_index: int,
     mae_model: ViTMAEForPreTraining = None,
 ):
     """
     Runs one episode with the given agent and environment, then visualizes the reconstructions.
-
-    :param ppo_agent: The agent with a `predict` method.
-    :param env: The environment (must implement reset() and step() and provide img attributes).
-    :param deterministic: Whether to use deterministic actions.
-    :param act_mae_model: Model for act_mae reconstruction visualization.
-    :param mae_model: Model for mae reconstruction visualization.
-    :param reconstruction_dir: Directory (e.g., pathlib.Path) where images will be saved.
-    :param img_index: Index used for naming the saved images.
     """
     obs, _ = env.reset()
-    state = None
     done = False
 
     while not done:
-        actions, state = ppo_agent.predict(
+        actions, _ = ppo_agent.predict(
             obs,
-            state=state,
             deterministic=deterministic,
         )
         obs, _, done, _, _ = env.step(actions, eval=True)
@@ -142,8 +144,9 @@ def run_episode_and_visualize_sampling(
         env.sampled_img,
         act_mae_model,
         show=False,
-        save_path=reconstruction_dir / f"act_mae_reconstruction_img_{img_index}"
+        save_path=reconstruction_dir / f"{filename}_{img_index}"
     )
+
     if mae_model is not None:
         visualize_mae_reconstruction(
             env.img,
@@ -168,7 +171,6 @@ class ImgReconstructinoCallback(BaseCallback):
         self.mae_model = mae_model
         self.reconstruction_dir = reconstruction_dir
         self.deterministic = deterministic
-        self._img_index = 0
 
     def _on_step(self) -> True:
         if self.num_timesteps % self.img_reconstruction_period == 0:
@@ -178,12 +180,11 @@ class ImgReconstructinoCallback(BaseCallback):
                 env=self.env,
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
-                # mae_model=self.mae_model,
                 reconstruction_dir=self.reconstruction_dir,
-                img_index=self._img_index,
+                filename="ppo_agent",
+                img_index=self.num_timesteps,
             )
 
-            self._img_index += 1
         return True
 
 
@@ -217,6 +218,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
 
         # Single image experiment debugging
+        rd.seed(SEED)
         random_index = rd.randint(0, len(tiny_imagenet_train_dataset) - 1)
         single_image_dataset = SingleImageDataset(tiny_imagenet_train_dataset, random_index)
 
@@ -244,7 +246,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             features_extractor_kwargs=dict(features_dim=512),
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=5,
+            img_reconstruction_period=10_000,
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -261,6 +263,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_epochs=params['n_epochs'],
             verbose=1
         )
+        rd_agent = RandomAgent(env)
         mlflow.log_params(params)
 
         loggers = Logger(
@@ -280,13 +283,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         model_uri = f"runs:/{run_id}/models"
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
-        # Evaluation loop
-        tiny_imagenet_val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
-        tiny_imagenet_val_loader = DataLoader(tiny_imagenet_val_dataset,
-                                              batch_size=env_config.img_batch_size,
-                                              collate_fn=tiny_imagenet_collate_fn,
-                                              generator=torch_generator,
-                                              shuffle=True)
+        # Evaluation loop (in same img for single img experiment)
+        # tiny_imagenet_val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
+        # tiny_imagenet_val_loader = DataLoader(tiny_imagenet_val_dataset,
+        #                                       batch_size=env_config.img_batch_size,
+        #                                       collate_fn=tiny_imagenet_collate_fn,
+        #                                       generator=torch_generator,
+        #                                       shuffle=True)
 
         eval_loggers = Logger(
             folder=None,
@@ -297,33 +300,41 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         total_mean_reward = 0
         val_batch_count = 0
         reward_list = []
-        for i, batch in enumerate(tiny_imagenet_val_loader):
+        for i, batch in enumerate(dataloader):
             vec_env.env_method("set_img", batch)
             mean_reward, _ = evaluate_policy(
                 ppo_agent,
                 vec_env,
-                n_eval_episodes=10,
+                n_eval_episodes=100,
                 deterministic=True,
                 return_episode_rewards=False
             )
 
             total_mean_reward += mean_reward
-            reward_list.append(mean_reward)  # Store mean rewards
+            reward_list.append(mean_reward)
             val_batch_count += 1
 
-            if i % (len(tiny_imagenet_val_loader.dataset) // 10) == 0:
-                run_episode_and_visualize_sampling(
-                    ppo_agent,
-                    env,
-                    deterministic=True,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    reconstruction_dir=eval_img_reconstruction_dir,
-                    img_index=i,
-                )
-            
-            if i == 0:  # single iteration for debugging
-                break
+            # if i % (len(tiny_imagenet_val_loader.dataset) // 10) == 0:
+            run_episode_and_visualize_sampling(
+                ppo_agent,
+                env,
+                deterministic=True,
+                act_mae_model=act_mae_model,
+                mae_model=mae_model,
+                filename="ppo_agent",
+                reconstruction_dir=eval_img_reconstruction_dir,
+                img_index=i,
+            )
+            run_episode_and_visualize_sampling(
+                rd_agent,
+                env,
+                deterministic=True,
+                act_mae_model=act_mae_model,
+                mae_model=mae_model,
+                filename="rd_agent",
+                reconstruction_dir=eval_img_reconstruction_dir,
+                img_index=i,
+            )
 
         val_mean_reward = total_mean_reward / val_batch_count
         val_std_reward = np.std(reward_list, ddof=1) if val_batch_count > 1 else 0
