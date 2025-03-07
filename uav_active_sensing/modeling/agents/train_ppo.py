@@ -40,22 +40,6 @@ PPO_PARAMS = {
     'seed': 0,
 }
 
-PPO_PARAMS_DEBUG = {
-    'steps_until_termination': 50,
-    'learning_rate': 3e-5,
-    'n_steps': 64,
-    'batch_size': 16,
-    'n_epochs': 10,
-    'clip_range': 0.2,
-    'gamma': 0.99,
-    'policy': 'CnnPolicy',
-    'gae_lambda': 0.95,
-    'ent_coef': 0.05,
-    'vf_coef': 0.5,
-    'device': DEVICE,
-    'seed': 0,
-}
-
 
 class RandomAgent(BaseAlgorithm):
     def __init__(self, env: ImageExplorationEnv):
@@ -78,6 +62,7 @@ class RandomAgent(BaseAlgorithm):
         return action, None
 
     def learn(self, *args, **kwargs):  # Dummy learn method
+
         pass
 
     def _setup_model(self):
@@ -160,7 +145,7 @@ def run_episode_and_visualize_sampling(
         env.sampled_img,
         act_mae_model,
         show=False,
-        save_path=reconstruction_dir / f"{filename}_{img_index}"
+        save_path=reconstruction_dir / f"{filename}_img={img_index}"
     )
 
     if mae_model is not None:
@@ -168,7 +153,7 @@ def run_episode_and_visualize_sampling(
             env.img,
             mae_model,
             show=False,
-            save_path=reconstruction_dir / f"mae_reconstruction_img_{img_index}"
+            save_path=reconstruction_dir / f"mae_reconstruction_img={img_index}"
         )
 
 
@@ -274,6 +259,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             mae_model=mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
         )
+        mlflow.log_params(params)
+
+        # PPO agent
         ppo_agent = PPO(
             params['policy'],
             env,
@@ -285,17 +273,18 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_epochs=params['n_epochs'],
             verbose=1
         )
-        mlflow.log_params(params)
-
-        loggers = Logger(
+        ppo_agent_logger = Logger(
             folder=None,
             output_formats=[HumanOutputFormat(sys.stdout), MLflowOutputFormat()],
         )
-        ppo_agent.set_logger(loggers)
-        vec_env = ppo_agent.get_env()
+        ppo_agent.set_logger(ppo_agent_logger)
+        ppo_vec_env = ppo_agent.get_env()
+
+        # Random agent
+        rd_agent = RandomAgent(env)
 
         for i, batch in enumerate(dataloader):
-            vec_env.env_method("set_img", batch)
+            ppo_vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
@@ -304,84 +293,56 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         model_uri = f"runs:/{run_id}/models"
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
-        # Evaluation loop with trained agent (in same img for single img experiment)
-
-        # tiny_imagenet_val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
-        # tiny_imagenet_val_loader = DataLoader(tiny_imagenet_val_dataset,
-        #                                       batch_size=env_config.img_batch_size,
-        #                                       collate_fn=tiny_imagenet_collate_fn,
-        #                                       generator=torch_generator,
-        #                                       shuffle=True)
-
-        eval_loggers = Logger(
-            folder=None,
-            output_formats=[HumanOutputFormat(sys.stdout), MLflowOutputFormat()],
-        )
-        ppo_agent.set_logger(eval_loggers)
-
-        # total_mean_reward = 0
-        # val_batch_count = 0
-        # reward_list = []
+        # Model evaluation
         for i, batch in enumerate(dataloader):
-            vec_env.env_method("set_img", batch)
+            ppo_vec_env.env_method("set_img", batch)
 
             # Trained agent
-            ex_obs = vec_env.reset()
-            # print(f"sample prediction trained: {ppo_agent.predict(ex_obs)}")
             mean_reward, std_reward = evaluate_policy(
                 ppo_agent,
-                vec_env,
+                ppo_vec_env,
                 n_eval_episodes=5,
                 deterministic=True,
                 return_episode_rewards=False
             )
 
-            # total_mean_reward += mean_reward
-            # reward_list.append(mean_reward)
-            # val_batch_count += 1
-
-            # if i % (len(tiny_imagenet_val_loader.dataset) // 10) == 0:
-
-            run_episode_and_visualize_sampling(
-                ppo_agent,
-                env,
+            rd_mean_reward, rd_std_reward = evaluate_policy(
+                rd_agent,
+                ppo_vec_env,
+                n_eval_episodes=5,
                 deterministic=True,
-                act_mae_model=act_mae_model,
-                mae_model=mae_model,
-                filename="ppo_agent",
-                reconstruction_dir=eval_img_reconstruction_dir,
-                img_index=i,
+                return_episode_rewards=False
             )
-            # val_mean_reward = total_mean_reward / val_batch_count
-            # val_std_reward = np.std(reward_list, ddof=1) if val_batch_count > 1 else std_reward
 
             mlflow.log_metric("eval/mean_reward", mean_reward)
             mlflow.log_metric("eval/std_reward", std_reward)
 
-            # Random agent
-            rd_agent = RandomAgent(env)
-            ex_obs = vec_env.reset()
-            # print(f"sample prediction random: {rd_agent.predict(ex_obs)}")
-            rd_mean_reward, rd_std_reward = evaluate_policy(
-                rd_agent,
-                vec_env,
-                n_eval_episodes=5,
-                deterministic=True,
-                return_episode_rewards=False
-            )
-            run_episode_and_visualize_sampling(
-                rd_agent,
-                env,
-                deterministic=True,
-                act_mae_model=act_mae_model,
-                mae_model=mae_model,
-                filename="rd_agent",
-                reconstruction_dir=eval_img_reconstruction_dir,
-                img_index=i,
-            )
-
             mlflow.log_metric("eval/rd_mean_reward", rd_mean_reward)
             mlflow.log_metric("eval/rd_std_reward", rd_std_reward)
+
+            # Example episodes visualization
+            for j in range(10):
+                run_episode_and_visualize_sampling(
+                    ppo_agent,
+                    env,
+                    deterministic=True,
+                    act_mae_model=act_mae_model,
+                    mae_model=mae_model,
+                    filename=f"ppo_agent_trial={j}",
+                    reconstruction_dir=eval_img_reconstruction_dir,
+                    img_index=i,
+                )
+
+                run_episode_and_visualize_sampling(
+                    rd_agent,
+                    env,
+                    deterministic=True,
+                    act_mae_model=act_mae_model,
+                    mae_model=mae_model,
+                    filename=f"rd_agent_trial={j}",
+                    reconstruction_dir=eval_img_reconstruction_dir,
+                    img_index=i,
+                )
 
         return {'loss': -mean_reward,
                 'loss_variance': -std_reward,
@@ -400,26 +361,26 @@ def ppo_fixed_params(experiment_name: str):
 
 
 @app.command()
-def ppo_param_search(experiment_name: str) -> None:
+def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
-    param_space = {
-        'steps_until_termination': hp.choice('steps_until_termination', [30, 40, 50]),
-        'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': hp.choice('n_steps', [128, 256, 512]),
-        'batch_size': hp.choice('batch_size', [32, 64, 128]),
-        'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
-        'clip_range': hp.uniform('clip_range', 0.1, 0.3),
-        'gamma': 0.99,
-        'policy': 'CnnPolicy',
-        'gae_lambda': 0.95,
-        'ent_coef': 0.0,
-        'vf_coef': 0.5,
-        'device': DEVICE,
-        'seed': hp.randint("seed", 0, 10_000),
-    }
+    # param_space = {
+    #     'steps_until_termination': hp.choice('steps_until_termination', [30, 40, 50]),
+    #     'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
+    #     'n_steps': hp.choice('n_steps', [128, 256, 512]),
+    #     'batch_size': hp.choice('batch_size', [32, 64, 128]),
+    #     'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
+    #     'clip_range': hp.uniform('clip_range', 0.1, 0.3),
+    #     'gamma': 0.99,
+    #     'policy': 'CnnPolicy',
+    #     'gae_lambda': 0.95,
+    #     'ent_coef': 0.0,
+    #     'vf_coef': 0.5,
+    #     'device': DEVICE,
+    #     'seed': hp.randint("seed", 0, 10_000),
+    # }
     seed_iter_param_space = PPO_PARAMS.copy()  # Fixed params, multiple seeds
-    seed_iter_param_space["seed"] = hp.randint("seed", 0, 10_000)
+    seed_iter_param_space["seed"] = hp.choice("seed", [i for i in range(10)])  # TODO: Fix this to a random integer
 
     with mlflow.start_run():
         # Conduct the hyperparameter search using Hyperopt
