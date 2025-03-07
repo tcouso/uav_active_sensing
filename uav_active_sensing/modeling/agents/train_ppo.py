@@ -67,14 +67,15 @@ class RandomAgent(BaseAlgorithm):
                 state: Optional[tuple[np.ndarray, ...]] = None,
                 episode_start: Optional[np.ndarray] = None,
                 deterministic: bool = False):
-        
+
+        _, _, _ = state, episode_start, deterministic
         action = self.action_space.sample()
         obs_dim = len(observation.shape)
 
-        if obs_dim == 5: # vectorized case
-            action = np.expand_dims(action, axis=0) 
+        if obs_dim == 5:  # vectorized case
+            action = np.expand_dims(action, axis=0)
 
-        return action, None  # TODO: Fix bug with this action
+        return action, None
 
     def learn(self, *args, **kwargs):  # Dummy learn method
         pass
@@ -267,7 +268,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             features_extractor_kwargs=dict(features_dim=512),
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=5,
+            img_reconstruction_period=10_000,
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -293,11 +294,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         ppo_agent.set_logger(loggers)
         vec_env = ppo_agent.get_env()
 
-        # for i, batch in enumerate(dataloader):
-        #     vec_env.env_method("set_img", batch)
-        #     ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+        for i, batch in enumerate(dataloader):
+            vec_env.env_method("set_img", batch)
+            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
-        # ppo_agent.save(models_dir / "ppo_model.zip")
+        ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry
         model_uri = f"runs:/{run_id}/models"
@@ -425,9 +426,9 @@ def ppo_param_search(experiment_name: str) -> None:
         trials = Trials()
         best = fmin(
             fn=objective,
-            space=param_space,
+            space=seed_iter_param_space,
             algo=tpe.suggest,
-            max_evals=2,
+            max_evals=5,
             trials=trials,
         )
 
@@ -438,10 +439,6 @@ def ppo_param_search(experiment_name: str) -> None:
         mlflow.log_params(best)
         mlflow.log_metric("eval/mean_reward", -best_run["loss"])
         mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
-
-        # # Print out the best parameters and corresponding loss
-        # print(f"Best parameters: {best}")
-        # print(f"Best val mean reward: {-best_run['loss']}")
 
 
 if __name__ == "__main__":
