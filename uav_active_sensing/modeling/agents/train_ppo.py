@@ -3,7 +3,7 @@ import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple
+from typing import Dict, Union, Any, Tuple, Optional
 import mlflow
 import numpy as np
 import torch
@@ -62,8 +62,18 @@ class RandomAgent(BaseAlgorithm):
         super().__init__(policy=None, env=env, learning_rate=0)
         self.action_space = env.action_space
 
-    def predict(self, *args, **kwargs):
+    def predict(self,
+                observation: Union[np.ndarray, dict[str, np.ndarray]],
+                state: Optional[tuple[np.ndarray, ...]] = None,
+                episode_start: Optional[np.ndarray] = None,
+                deterministic: bool = False):
+        
         action = self.action_space.sample()
+        obs_dim = len(observation.shape)
+
+        if obs_dim == 5: # vectorized case
+            action = np.expand_dims(action, axis=0) 
+
         return action, None  # TODO: Fix bug with this action
 
     def learn(self, *args, **kwargs):  # Dummy learn method
@@ -122,7 +132,7 @@ class MLflowOutputFormat(KVWriter):
 
 
 def run_episode_and_visualize_sampling(
-    ppo_agent: PPO,
+    agent,
     env: ImageExplorationEnv,
     deterministic: bool,
     act_mae_model: ActViTMAEForPreTraining,
@@ -138,7 +148,7 @@ def run_episode_and_visualize_sampling(
     done = False
 
     while not done:
-        actions, _ = ppo_agent.predict(
+        actions, _ = agent.predict(
             obs,
             deterministic=deterministic,
         )
@@ -181,7 +191,7 @@ class ImgReconstructinoCallback(BaseCallback):
         if self.num_timesteps % self.img_reconstruction_period == 0:
             # Image reconstruction
             run_episode_and_visualize_sampling(
-                ppo_agent=self.model,
+                agent=self.model,
                 env=self.env,
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
@@ -274,7 +284,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_epochs=params['n_epochs'],
             verbose=1
         )
-        rd_agent = RandomAgent(env)
         mlflow.log_params(params)
 
         loggers = Logger(
@@ -316,6 +325,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             vec_env.env_method("set_img", batch)
 
             # Trained agent
+            ex_obs = vec_env.reset()
+            # print(f"sample prediction trained: {ppo_agent.predict(ex_obs)}")
             mean_reward, std_reward = evaluate_policy(
                 ppo_agent,
                 vec_env,
@@ -329,6 +340,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             # val_batch_count += 1
 
             # if i % (len(tiny_imagenet_val_loader.dataset) // 10) == 0:
+
             run_episode_and_visualize_sampling(
                 ppo_agent,
                 env,
@@ -346,6 +358,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             mlflow.log_metric("eval/std_reward", std_reward)
 
             # Random agent
+            rd_agent = RandomAgent(env)
+            ex_obs = vec_env.reset()
+            # print(f"sample prediction random: {rd_agent.predict(ex_obs)}")
             rd_mean_reward, rd_std_reward = evaluate_policy(
                 rd_agent,
                 vec_env,
@@ -424,9 +439,9 @@ def ppo_param_search(experiment_name: str) -> None:
         mlflow.log_metric("eval/mean_reward", -best_run["loss"])
         mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
-        # Print out the best parameters and corresponding loss
-        print(f"Best parameters: {best}")
-        print(f"Best val mean reward: {-best_run['loss']}")
+        # # Print out the best parameters and corresponding loss
+        # print(f"Best parameters: {best}")
+        # print(f"Best val mean reward: {-best_run['loss']}")
 
 
 if __name__ == "__main__":

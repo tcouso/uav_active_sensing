@@ -161,9 +161,11 @@ class ImageExplorationEnv(gym.Env):
         return observation, info
 
     def step(self, action: np.ndarray, eval: bool=False) -> Tuple[np.ndarray, float, bool, bool, dict]:
-
+        # print(f"Action pre norm: {action}")
         action = torch.from_numpy(action)
         action = self._denormalize_action(action)
+        # print(f"Action post norm: {action}")
+
         self.move(action)
         observation = self._get_obs()
 
@@ -341,7 +343,7 @@ class ImageExplorationEnv(gym.Env):
             dz (int): The change in the kernel size.
         """
 
-        # assert action.shape == (self.batch_size, 3)
+        # assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
 
         self._sensor_pos += action[:, :2]
         self._kernel_size += action[:, 2]
