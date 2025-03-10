@@ -213,7 +213,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
         train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
-        seed = params['seed'].item()
+        seed = params['seed'] if type(params['seed']) == int else params['seed'].item()
         torch_generator = torch.Generator().manual_seed(seed)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
