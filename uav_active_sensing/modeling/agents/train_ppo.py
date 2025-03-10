@@ -284,6 +284,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Random agent
         rd_agent = RandomAgent(env)
 
+
         for i, batch in enumerate(dataloader):
             ppo_vec_env.env_method("set_img", batch)
             ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
@@ -297,6 +298,14 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Model evaluation
         for i, batch in enumerate(dataloader):
             ppo_vec_env.env_method("set_img", batch)
+
+            # MAE reward
+            with torch.no_grad():
+                outputs = mae_model(batch)
+            loss = outputs.loss
+            mae_reward = 1 / (1 + loss)
+
+            mlflow.log_metric("eval/mae_reward", mae_reward)
 
             # Trained agent
             mean_reward, std_reward = evaluate_policy(
