@@ -311,7 +311,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 rd_agent,
                 ppo_vec_env,
                 n_eval_episodes=5,
-                deterministic=True,
+                deterministic=False,
                 return_episode_rewards=False
             )
 
@@ -395,12 +395,12 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
         )
 
         # Fetch the details of the best run
-        best_run = sorted(trials.results, key=lambda x: -x["loss"])[0]
+        best_run = sorted(trials.results, key=lambda x: x["loss"])[0]
 
         # Log the best parameters, loss, and model
         mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", -best_run["loss"])
-        mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
+        mlflow.log_metric("eval/mean_reward", best_run["loss"])
+        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
 
 
 if __name__ == "__main__":
