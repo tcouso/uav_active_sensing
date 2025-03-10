@@ -213,12 +213,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
         train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
-        torch_generator = torch.Generator().manual_seed(params["seed"])
+        seed = params['seed'].item()
+        torch_generator = torch.Generator().manual_seed(seed)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
 
         # Single image experiment
-        rd.seed(params["seed"])
+        rd.seed(seed)
         random_index = rd.randint(0, len(tiny_imagenet_train_dataset) - 1)
         single_image_dataset = SingleImageDataset(tiny_imagenet_train_dataset, random_index)
 
@@ -231,11 +232,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Pretrained model and reward function
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
-        mae_config.seed = params['seed']
+        mae_config.seed = seed
         mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=mae_config).to(DEVICE)
 
         act_mae_config = ActViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
-        act_mae_config.seed = params['seed']
+        act_mae_config.seed = seed
         act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=act_mae_config).to(DEVICE)
 
         reward_function = RewardFunction(act_mae_model)
@@ -245,7 +246,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
                                                steps_until_termination=params['steps_until_termination'],
                                                reward_function=reward_function,
-                                               seed=params['seed']
+                                               seed=seed
                                                )
         env = ImageExplorationEnv(env_config)
         ppo_agent_policy_kwargs = dict(
@@ -267,7 +268,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             env,
             policy_kwargs=ppo_agent_policy_kwargs,
             device=params['device'],
-            seed=params['seed'],
+            seed=seed,
             n_steps=params['n_steps'],
             batch_size=params['batch_size'],
             n_epochs=params['n_epochs'],
@@ -377,10 +378,10 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
     #     'ent_coef': 0.0,
     #     'vf_coef': 0.5,
     #     'device': DEVICE,
-    #     'seed': hp.randint("seed", 0, 10_000),
+    #     'seed': hp.randint('seed', 0, 10_000),
     # }
     seed_iter_param_space = PPO_PARAMS.copy()  # Fixed params, multiple seeds
-    seed_iter_param_space["seed"] = hp.choice("seed", [i for i in range(10)])  # TODO: Fix this to a random integer
+    seed_iter_param_space['seed'] = hp.randint('seed', 100_000)
 
     with mlflow.start_run():
         # Conduct the hyperparameter search using Hyperopt
