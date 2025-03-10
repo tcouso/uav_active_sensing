@@ -25,24 +25,11 @@ REPORTS_DIR = PROJ_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
 
 TINY_IMAGENET_URL = "http://cs231n.stanford.edu/tiny-imagenet-200.zip"
-TINY_IMAGENET_DIR = EXTERNAL_DATA_DIR /  "tiny_imagenet/tiny-imagenet-200"
+# TINY_IMAGENET_DIR = EXTERNAL_DATA_DIR /  "tiny_imagenet/tiny-imagenet-200"
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406])
 IMAGENET_STD = np.array([0.229, 0.224, 0.225])
 
 CIFAR10_DIR = EXTERNAL_DATA_DIR / "cifar10/cifar-10-batches-py"
-
-# Random seed setter function
-SEED = 84
-# def set_seed(seed: int = SEED):
-#     """Set the random seed for reproducibility across multiple libraries."""
-#     random.seed(seed)
-#     np.random.seed(seed)
-#     torch.manual_seed(seed)
-#     torch.cuda.manual_seed(seed)
-#     torch.cuda.manual_seed_all(seed)  # If using multiple GPUs
-#     torch.backends.cudnn.deterministic = True
-#     torch.backends.cudnn.benchmark = False
-
 
 # Select device
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

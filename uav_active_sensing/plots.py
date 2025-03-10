@@ -32,8 +32,8 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
     mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
 
-    x = torch.einsum('nchw->nhwc', pixel_values)
-
+    x = torch.einsum('nchw->nhwc', pixel_values).detach().cpu()
+    
     # masked image
     im_masked = x * (1 - mask)
 
@@ -78,7 +78,10 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_v
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
     mask = torch.einsum("nchw->nhwc", mask).detach().cpu()
 
-    x = torch.einsum("nchw->nhwc", pixel_values)
+    x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
+
+    # sampled image
+    im_sampled = sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1)
 
     # masked image
     im_masked = x * (1 - mask)
@@ -89,16 +92,19 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_v
     # make the plt figure larger
     plt.rcParams["figure.figsize"] = [24, 24]
 
-    plt.subplot(1, 4, 1)
+    plt.subplot(1, 5, 1)
     show_image(x[0], "original")
 
-    plt.subplot(1, 4, 2)
+    plt.subplot(1, 5, 2)
+    show_image(im_sampled[0], "sampled")
+
+    plt.subplot(1, 5, 3)
     show_image(im_masked[0], "masked")
 
-    plt.subplot(1, 4, 3)
+    plt.subplot(1, 5, 4)
     show_image(y[0], f"reconstruction (MSE: {outputs.loss:.6f})")
 
-    plt.subplot(1, 4, 4)
+    plt.subplot(1, 5, 5)
     show_image(im_paste[0], "reconstruction + visible")
 
     # Save the plot if a path is provided
@@ -139,10 +145,10 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
 
     # Plot the tensor as an image
     plt.figure(figsize=(6, 6))
-    plt.imshow(tensor.numpy())
+    plt.imshow(tensor.cpu().numpy())
     plt.title(f"Tensor (Batch {batch_idx})" if tensor.dim() == 4 else "Tensor")
     plt.axis("off")  # Hide axis
-    
+
     # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")

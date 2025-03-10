@@ -8,7 +8,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
-from uav_active_sensing.config import DEVICE, SEED
+from uav_active_sensing.config import DEVICE
 
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
@@ -37,14 +37,14 @@ class RewardFunction:
 @dataclass
 class ImageExplorationEnvConfig:
     device: str = DEVICE
-    seed: int = SEED
+    seed: int = None
     img_batch_size: int = 1
-    patch_size: int = 16
+    patch_size: int = 2 * 16
     steps_until_termination: int = 30
     interval_reward_assignment: int = 5
-    v_max_x: int = patch_size * 2
-    v_max_y: int = patch_size * 2
-    v_max_z: int = 2
+    v_max_x: int = patch_size
+    v_max_y: int = patch_size
+    v_max_z: int = 0
 
     # Set during execution
     img_sensor_ratio: float = None
@@ -60,7 +60,7 @@ class ImageExplorationEnv(gym.Env):
         super().__init__()
         self.device = env_config.device
         self.seed = env_config.seed
-        self.generator = torch.Generator(device=self.device).manual_seed(self.seed)
+        self.generator = torch.Generator().manual_seed(self.seed)
         self.img = env_config.img
         self.img_height, self.img_width = self.img.shape[2:]
         self.batch_size = self.img.shape[0]
@@ -118,7 +118,7 @@ class ImageExplorationEnv(gym.Env):
 
     def _get_obs(self) -> np.ndarray:
 
-        obs = torch.nan_to_num(self.sampled_img, nan=0.0).detach().numpy()
+        obs = torch.nan_to_num(self.sampled_img, nan=0.0).cpu().numpy()
 
         return obs
 
@@ -137,7 +137,7 @@ class ImageExplorationEnv(gym.Env):
 
         return denormalized_action.to(dtype=torch.int)
 
-    def reset(self, seed: Optional[int] = SEED, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         if seed != None:
             super().reset(seed=seed)
 
@@ -161,9 +161,11 @@ class ImageExplorationEnv(gym.Env):
         return observation, info
 
     def step(self, action: np.ndarray, eval: bool=False) -> Tuple[np.ndarray, float, bool, bool, dict]:
-
+        # print(f"Action pre norm: {action}")
         action = torch.from_numpy(action)
         action = self._denormalize_action(action)
+        # print(f"Action post norm: {action}")
+
         self.move(action)
         observation = self._get_obs()
 
@@ -341,7 +343,7 @@ class ImageExplorationEnv(gym.Env):
             dz (int): The change in the kernel size.
         """
 
-        # assert action.shape == (self.batch_size, 3)
+        # assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
 
         self._sensor_pos += action[:, :2]
         self._kernel_size += action[:, 2]
