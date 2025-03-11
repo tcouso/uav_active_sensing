@@ -10,14 +10,17 @@ from gymnasium import spaces
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
 
+
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
     return torch.where(abs(t % 2) == 1, t, t - 1)
 
 
 class RewardFunction:
-    def __init__(self, model):
+    def __init__(self, model, reward_increase: bool = False):
         self.model: ActViTMAEForPreTraining = model
+        self.last_reward: int = 0
+        self.reward_increase = reward_increase
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
 
@@ -31,7 +34,12 @@ class RewardFunction:
             reward_i = 1 / (1 + loss)
             batch_reward[img_i] = reward_i
 
-        return batch_reward.sum().item()
+        new_reward = batch_reward.sum().item()
+        if self.reward_increase:
+            new_reward = new_reward - self.last_reward
+            self.last_reward = new_reward
+
+        return new_reward
 
 
 @dataclass
@@ -50,6 +58,7 @@ class ImageExplorationEnvConfig:
     img_sensor_ratio: float = None
     img: torch.Tensor = None
     reward_function: RewardFunction = None
+
 
 class ImageExplorationEnv(gym.Env):
 
@@ -110,7 +119,7 @@ class ImageExplorationEnv(gym.Env):
             [0, self.v_max_y, 0], [0, -self.v_max_y, 0],  # dy
             [0, 0, self.v_max_z], [0, 0, -self.v_max_z]   # dz
         ])
-        move = np.array([moves[action]]) # Add batch dim
+        move = np.array([moves[action]])  # Add batch dim
 
         return move
 
@@ -124,7 +133,6 @@ class ImageExplorationEnv(gym.Env):
         info = {}
 
         return info
-
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         if seed != None:
@@ -150,7 +158,7 @@ class ImageExplorationEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action: np.ndarray, eval: bool=False) -> Tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: np.ndarray, eval: bool = False) -> Tuple[np.ndarray, float, bool, bool, dict]:
         action = self._decode_action(action)
         self.move(action)
         observation = self._get_obs()
