@@ -29,7 +29,7 @@ PPO_PARAMS = {
     'interval_reward_assignment': 10,
     'reward_increase': True,
     'learning_rate': 1e-5,
-    'n_steps': 1024,
+    'n_steps': 128,
     'batch_size': 32,
     'n_epochs': 3,
     'clip_range': 0.2,
