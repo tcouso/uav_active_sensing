@@ -254,6 +254,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(features_dim=512),
+            normalize_images=False
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
             img_reconstruction_period=10_000,
@@ -402,25 +403,22 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
 def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
-    # param_space = {
-    #     'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
-    #     'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-    #     'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
-    #     'batch_size': hp.choice('batch_size', [32, 64, 128]),
-    #     'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
-    #     'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
-    #     'gamma': hp.choice('gamma', [0.95, 0.99]),  # Slightly lower gamma encourages more exploration
-    #     'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
-    #     'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
-    #     'policy': 'CnnPolicy',
-    #     'vf_coef': 0.5,
-    #     'device': DEVICE,
-    #     'seed': 0,
-    # }
-
-    param_space = PPO_PARAMS.copy()
-    param_space['seed'] = hp.randint('seed', 100_000)
-    param_space['interval_reward_assignment'] = hp.choice('interval_reward_assignment', [i for i in range(5, 55, 5)])
+    param_space = {
+        'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
+        'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 10, 15]),
+        'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
+        'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
+        'batch_size': hp.choice('batch_size', [32, 64, 128]),
+        'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
+        'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
+        'gamma': hp.choice('gamma', [0.95, 0.99]),  # Slightly lower gamma encourages more exploration
+        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
+        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
+        'policy': 'CnnPolicy',
+        'vf_coef': 0.5,
+        'device': DEVICE,
+        'seed': 64553,
+    }
 
     with mlflow.start_run():
         trials = Trials()
@@ -428,7 +426,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
             fn=objective,
             space=param_space,
             algo=tpe.suggest,
-            max_evals=24,
+            max_evals=16,
             trials=trials,
         )
 
