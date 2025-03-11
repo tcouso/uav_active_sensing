@@ -150,6 +150,7 @@ class ImageExplorationEnv(gym.Env):
             dtype=torch.int32
         )
         self._kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
+        self._reward_function.last_reward = 0
         self._step_count = 0
 
         self._update_sampled_img()  # Initial env observation is without movement
