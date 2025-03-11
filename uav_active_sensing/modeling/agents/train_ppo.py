@@ -25,17 +25,18 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 100,
-    'interval_reward_assignment': 5,
+    'steps_until_termination': 200,
+    'interval_reward_assignment': 10,
+    'reward_increase': True,
     'learning_rate': 7e-4,
     'n_steps': 1024,
     'batch_size': 64,
     'n_epochs': 5,
     'clip_range': 0.38,
-    'gamma': 0.95,
+    'gamma': 0.99,
     'policy': 'CnnPolicy',
     'gae_lambda': 0.84,
-    'ent_coef': 0.01,
+    'ent_coef': 0.05,
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 0,
@@ -240,7 +241,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         act_mae_config.seed = seed
         act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=act_mae_config).to(DEVICE)
 
-        reward_function = RewardFunction(act_mae_model)
+        reward_function = RewardFunction(act_mae_model, reward_increase=params['reward_increase'])
 
         # Take one image as a dummy input for env initialization
         dummy_batch = next(iter(dataloader))
@@ -405,6 +406,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_tracking_uri("http://localhost:5000")
     param_space = {
         'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
+        'reward_increase': hp.choice('reward_increase', [True, False]),
         'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 10, 15]),
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
         'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates

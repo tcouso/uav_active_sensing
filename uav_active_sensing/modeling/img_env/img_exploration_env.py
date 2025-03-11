@@ -17,7 +17,7 @@ def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
 
 class RewardFunction:
-    def __init__(self, model, reward_increase: bool = False):
+    def __init__(self, model, reward_increase: bool):
         self.model: ActViTMAEForPreTraining = model
         self.last_reward: int = 0
         self.reward_increase = reward_increase
