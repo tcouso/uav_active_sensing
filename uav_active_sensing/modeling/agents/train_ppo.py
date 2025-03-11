@@ -25,16 +25,17 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 15,
-    'learning_rate': 3e-5,
-    'n_steps': 2048,
-    'batch_size': 256,
-    'n_epochs': 10,
-    'clip_range': 0.2,
-    'gamma': 0.99,
+    'steps_until_termination': 100,
+    'interval_reward_assignment': 5,
+    'learning_rate': 7e-4,
+    'n_steps': 1024,
+    'batch_size': 64,
+    'n_epochs': 5,
+    'clip_range': 0.38,
+    'gamma': 0.95,
     'policy': 'CnnPolicy',
-    'gae_lambda': 0.95,
-    'ent_coef': 0.05,
+    'gae_lambda': 0.84,
+    'ent_coef': 0.01,
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 0,
@@ -245,6 +246,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         dummy_batch = next(iter(dataloader))
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
                                                steps_until_termination=params['steps_until_termination'],
+                                               interval_reward_assignment=params['interval_reward_assignment'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )
@@ -283,7 +285,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Random agent
         rd_agent = RandomAgent(env)
-
 
         for i, batch in enumerate(dataloader):
             ppo_vec_env.env_method("set_img", batch)
@@ -371,45 +372,6 @@ def ppo_fixed_params(experiment_name: str):
 
 
 @app.command()
-def ppo_fixed_params_hiperparameter_search(experiment_name: str) -> None:
-    mlflow.set_experiment(experiment_name)
-    mlflow.set_tracking_uri("http://localhost:5000")
-    param_space = {
-        'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
-        'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
-        'batch_size': hp.choice('batch_size', [32, 64, 128]),
-        'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
-        'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
-        'gamma': hp.choice('gamma', [0.95, 0.99]),  # Slightly lower gamma encourages more exploration
-        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
-        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
-        'policy': 'CnnPolicy',
-        'vf_coef': 0.5,
-        'device': DEVICE,
-        'seed': 0,
-    }
-
-    with mlflow.start_run():
-        trials = Trials()
-        best = fmin(
-            fn=objective,
-            space=param_space,
-            algo=tpe.suggest,
-            max_evals=24,
-            trials=trials,
-        )
-
-        # Fetch the details of the best run
-        best_run = sorted(trials.results, key=lambda x: x["loss"])[0]
-
-        # Log the best parameters, loss, and model
-        mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", best_run["loss"])
-        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
-
-
-@app.command()
 def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
@@ -424,6 +386,49 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
             space=seed_iter_param_space,
             algo=tpe.suggest,
             max_evals=5,
+            trials=trials,
+        )
+
+        # Fetch the details of the best run
+        best_run = sorted(trials.results, key=lambda x: x["loss"])[0]
+
+        # Log the best parameters, loss, and model
+        mlflow.log_params(best)
+        mlflow.log_metric("eval/mean_reward", best_run["loss"])
+        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
+
+
+@app.command()
+def ppo_hiperparameter_search(experiment_name: str) -> None:
+    mlflow.set_experiment(experiment_name)
+    mlflow.set_tracking_uri("http://localhost:5000")
+    # param_space = {
+    #     'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
+    #     'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
+    #     'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
+    #     'batch_size': hp.choice('batch_size', [32, 64, 128]),
+    #     'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
+    #     'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
+    #     'gamma': hp.choice('gamma', [0.95, 0.99]),  # Slightly lower gamma encourages more exploration
+    #     'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
+    #     'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
+    #     'policy': 'CnnPolicy',
+    #     'vf_coef': 0.5,
+    #     'device': DEVICE,
+    #     'seed': 0,
+    # }
+
+    param_space = PPO_PARAMS.copy()
+    param_space['seed'] = hp.randint('seed', 100_000)
+    param_space['interval_reward_assignment'] = hp.choice('interval_reward_assignment', [i for i in range(5, 55, 5)])
+
+    with mlflow.start_run():
+        trials = Trials()
+        best = fmin(
+            fn=objective,
+            space=param_space,
+            algo=tpe.suggest,
+            max_evals=24,
             trials=trials,
         )
 
