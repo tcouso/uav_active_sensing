@@ -10,14 +10,17 @@ from gymnasium import spaces
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
 
+
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
     return torch.where(abs(t % 2) == 1, t, t - 1)
 
 
 class RewardFunction:
-    def __init__(self, model):
+    def __init__(self, model, reward_increase: bool):
         self.model: ActViTMAEForPreTraining = model
+        self.last_reward: int = 0
+        self.reward_increase = reward_increase
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
 
@@ -31,7 +34,12 @@ class RewardFunction:
             reward_i = 1 / (1 + loss)
             batch_reward[img_i] = reward_i
 
-        return batch_reward.sum().item()
+        new_reward = batch_reward.sum().item()
+        if self.reward_increase:
+            new_reward = new_reward - self.last_reward
+            self.last_reward = new_reward
+
+        return new_reward
 
 
 @dataclass
@@ -39,7 +47,7 @@ class ImageExplorationEnvConfig:
     device: str = DEVICE
     seed: int = None
     img_batch_size: int = 1
-    patch_size: int = 2 * 16
+    patch_size: int = 16
     steps_until_termination: int = 30
     interval_reward_assignment: int = 5
     v_max_x: int = patch_size
@@ -50,8 +58,6 @@ class ImageExplorationEnvConfig:
     img_sensor_ratio: float = None
     img: torch.Tensor = None
     reward_function: RewardFunction = None
-
-# TODO: Ensure cuda placing
 
 
 class ImageExplorationEnv(gym.Env):
@@ -73,17 +79,14 @@ class ImageExplorationEnv(gym.Env):
             self.sensor_width = env_config.patch_size
 
         self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
-        self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32, generator=self.generator),
-            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32, generator=self.generator)
-        ], dim=1)
-        # max_h = (self.img_height - self.sensor_height) // self.sensor_height + 1
-        # max_w = (self.img_width - self.sensor_width) // self.sensor_width + 1
 
-        # self.__sensor_pos = torch.stack([
-        #     torch.randint(0, max_h, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_height,
-        #     torch.randint(0, max_w, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_width,
-        # ], dim=1)
+        self.max_sensor_h = (self.img_height - self.sensor_height) // self.sensor_height + 1
+        self.max_sensor_w = (self.img_width - self.sensor_width) // self.sensor_width + 1
+
+        self.__sensor_pos = torch.stack([
+            torch.randint(0, self.max_sensor_h, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_height,
+            torch.randint(0, self.max_sensor_w, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_width,
+        ], dim=1)
 
         self._min_kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
         self.__kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
@@ -108,13 +111,17 @@ class ImageExplorationEnv(gym.Env):
             dtype=np.float32,
             seed=self.seed
         )
+        self.action_space = spaces.Discrete(6)
 
-        self.action_space = spaces.Box(
-            low=np.tile(np.array([-1, -1, -1], dtype=np.float32), (self.batch_size, 1)),
-            high=np.tile(np.array([1, 1, 1], dtype=np.float32), (self.batch_size, 1)),
-            dtype=np.float32,
-            seed=self.seed
-        )
+    def _decode_action(self, action: int) -> np.ndarray:
+        moves = np.array([
+            [self.v_max_x, 0, 0], [-self.v_max_x, 0, 0],  # dx
+            [0, self.v_max_y, 0], [0, -self.v_max_y, 0],  # dy
+            [0, 0, self.v_max_z], [0, 0, -self.v_max_z]   # dz
+        ])
+        move = np.array([moves[action]])  # Add batch dim
+
+        return move
 
     def _get_obs(self) -> np.ndarray:
 
@@ -127,24 +134,15 @@ class ImageExplorationEnv(gym.Env):
 
         return info
 
-    def _denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
-        # Env action space bounds
-        low = torch.tensor([-self.v_max_x, -self.v_max_y, -self.v_max_z], dtype=torch.float32, device=action.device)
-        high = torch.tensor([self.v_max_x, self.v_max_y, self.v_max_z], dtype=torch.float32, device=action.device)
-
-        # Denormalize action
-        denormalized_action = low + (action + 1) * 0.5 * (high - low)
-
-        return denormalized_action.to(dtype=torch.int)
-
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         if seed != None:
             super().reset(seed=seed)
 
         self.__sensor_pos = torch.stack([
-            torch.randint(0, self.img_height - self.sensor_height, (self.batch_size,), dtype=torch.int32, generator=self.generator),
-            torch.randint(0, self.img_width - self.sensor_width, (self.batch_size,), dtype=torch.int32, generator=self.generator)
+            torch.randint(0, self.max_sensor_h, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_height,
+            torch.randint(0, self.max_sensor_w, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_width,
         ], dim=1)
+
         self.sampled_img = torch.full_like(self.img, float("nan"), device=self.device)
         self._sampled_kernel_size_mask = torch.full_like(
             self.img,
@@ -152,6 +150,7 @@ class ImageExplorationEnv(gym.Env):
             dtype=torch.int32
         )
         self._kernel_size = torch.ones(self.batch_size, dtype=torch.int32)
+        self._reward_function.last_reward = 0
         self._step_count = 0
 
         self._update_sampled_img()  # Initial env observation is without movement
@@ -160,12 +159,8 @@ class ImageExplorationEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action: np.ndarray, eval: bool=False) -> Tuple[np.ndarray, float, bool, bool, dict]:
-        # print(f"Action pre norm: {action}")
-        action = torch.from_numpy(action)
-        action = self._denormalize_action(action)
-        # print(f"Action post norm: {action}")
-
+    def step(self, action: np.ndarray, eval: bool = False) -> Tuple[np.ndarray, float, bool, bool, dict]:
+        action = self._decode_action(action)
         self.move(action)
         observation = self._get_obs()
 
@@ -343,7 +338,7 @@ class ImageExplorationEnv(gym.Env):
             dz (int): The change in the kernel size.
         """
 
-        # assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
+        assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
 
         self._sensor_pos += action[:, :2]
         self._kernel_size += action[:, 2]
