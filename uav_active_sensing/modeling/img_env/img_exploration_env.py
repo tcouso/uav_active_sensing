@@ -17,22 +17,25 @@ def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
 
 class RewardFunction:
-    def __init__(self, model, reward_increase: bool):
-        self.model: ActViTMAEForPreTraining = model
-        self.last_reward: int = 0
+    def __init__(self, model: ActViTMAEForPreTraining, num_samples: int, patch_size: int, generator: torch.Generator, reward_increase: bool):
+        self.model = model
+        self.num_samples = num_samples
+        self.generator = generator
+        self.patch_size = patch_size
+        self.last_reward = 0
         self.reward_increase = reward_increase
 
-    def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
+    def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor, masking_ratio: float) -> float:
 
-        batch_size = img.shape[0]
-        batch_reward = torch.zeros(batch_size, dtype=torch.float32)
+        batch_reward = torch.zeros(self.num_samples, dtype=torch.float32)
 
-        for img_i in range(batch_size):
+        for i in self.num_samples:
+            masked_sampled_img = self.sampled_img_random_masking(sampled_img, masking_ratio=masking_ratio)
             with torch.no_grad():
-                outputs = self.model(img[img_i].unsqueeze(0), sampled_img[img_i].unsqueeze(0))
+                outputs = self.model(img, masked_sampled_img)
             loss = outputs.loss
             reward_i = 1 / (1 + loss)
-            batch_reward[img_i] = reward_i
+            batch_reward[i] = reward_i
 
         new_reward = batch_reward.sum().item()
         if self.reward_increase:
@@ -40,6 +43,35 @@ class RewardFunction:
             self.last_reward = new_reward
 
         return new_reward
+
+    def sampled_img_random_masking(self, sampled_img: torch.Tensor, masking_ratio: float) -> torch.Tensor:
+
+        B, C, H, W = sampled_img.shape
+        x = torch.clone(sampled_img)
+        x = x.permute(0, 2, 3, 1)
+
+        kc, kh = self.patch_size, self.patch_size  # kernel size
+        dc, dh = self.patch_size, self.patch_size  # stride
+
+        patches = x.unfold(1, kc, dc).unfold(2, kh, dh)
+        nan_mask = torch.isnan(patches)
+        patch_nan_mask = nan_mask.any(dim=(3, 4, 5))
+        valid_patches = ~patch_nan_mask
+        valid_indices = torch.nonzero(valid_patches, as_tuple=True)
+
+        num_valid = valid_indices[0].shape[0]  # Count of valid patches, error
+        num_to_mask = int(masking_ratio * num_valid)  # Number of patches to mask
+
+        mask_indices = torch.randperm(num_valid, generator=self.generator)[:num_to_mask]
+        selected_patches = tuple(idx[mask_indices] for idx in valid_indices)  # Extract selected patch indices
+
+        # Apply NaN masking
+        patches[selected_patches] = float('nan')
+
+        # Reassemble image from patches
+        reconstructed = patches.permute(0, 3, 1, 4, 2, 5).view(B, C, H, W)
+
+        return reconstructed
 
 
 @dataclass
@@ -105,7 +137,7 @@ class ImageExplorationEnv(gym.Env):
         self._interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Box(
-            low=-3.0,  # Bounds are a conservative estimate based on ImageNet normalization params
+            low=-3.0,  # Bounds are a conservative estimate based on ImageNet images normalization params
             high=3.0,
             shape=(self.batch_size, 3, 224, 224),
             dtype=np.float32,
@@ -136,7 +168,7 @@ class ImageExplorationEnv(gym.Env):
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         if seed != None:
-            super().reset(seed=seed)
+            super().reset(seed=seed, options=options)
 
         self.__sensor_pos = torch.stack([
             torch.randint(0, self.max_sensor_h, (self.batch_size,), dtype=torch.int32, generator=self.generator) * self.sensor_height,
@@ -338,7 +370,7 @@ class ImageExplorationEnv(gym.Env):
             dz (int): The change in the kernel size.
         """
 
-        assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
+        # assert action.shape == (self.batch_size, 3), f"Wrong shape. Expected {(self.batch_size, 3)}, Actual: {action.shape}"
 
         self._sensor_pos += action[:, :2]
         self._kernel_size += action[:, 2]
