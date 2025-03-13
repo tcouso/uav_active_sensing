@@ -260,7 +260,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             normalize_images=False
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=10_000,
+            img_reconstruction_period=2_500,
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -426,7 +426,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
         'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 25]),
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
         'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
-        'total_timesteps': 100_000,
+        'total_timesteps': 25_000,
         'batch_size': hp.choice('batch_size', [32, 64, 128]),
         'n_epochs': hp.choice('n_epochs', [3, 5]),
         'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
@@ -445,7 +445,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
             fn=objective,
             space=param_space,
             algo=tpe.suggest,
-            max_evals=25,
+            max_evals=10,
             trials=trials,
         )
 
