@@ -27,7 +27,10 @@ app = typer.Typer()
 PPO_PARAMS = {
     'steps_until_termination': 200,
     'interval_reward_assignment': 10,
+    'num_samples': 3,
     'reward_increase': True,
+    'sensor_size': 32,
+    'patch_size': 16,
     'learning_rate': 1e-5,
     'n_steps': 128,
     'batch_size': 32,
@@ -235,19 +238,26 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Pretrained model and reward function
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         mae_config.seed = seed
+        mae_config.patch_size = params['patch_size']
         mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=mae_config).to(DEVICE)
 
         act_mae_config = ActViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         act_mae_config.seed = seed
         act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=act_mae_config).to(DEVICE)
 
-        reward_function = RewardFunction(act_mae_model, reward_increase=params['reward_increase'])
+        reward_function = RewardFunction(act_mae_model,
+                                         num_sampled=params['num_samples'],
+                                         reward_increase=params['reward_increase'],
+                                         patch_size=params['patch_size'],
+                                         generator=torch_generator,
+                                         )
 
         # Take one image as a dummy input for env initialization
         dummy_batch = next(iter(dataloader))
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
                                                steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
+                                               sensor_size=params['sensor_size'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )

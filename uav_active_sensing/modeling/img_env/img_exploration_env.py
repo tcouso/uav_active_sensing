@@ -22,8 +22,8 @@ class RewardFunction:
         self.num_samples = num_samples
         self.generator = generator
         self.patch_size = patch_size
-        self.last_reward = 0
         self.reward_increase = reward_increase
+        self.last_reward = 0
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor, masking_ratio: float) -> float:
 
@@ -79,11 +79,11 @@ class ImageExplorationEnvConfig:
     device: str = DEVICE
     seed: int = None
     img_batch_size: int = 1
-    patch_size: int = 16
+    sensor_size: int = 2 * 16
     steps_until_termination: int = 30
     interval_reward_assignment: int = 5
-    v_max_x: int = patch_size
-    v_max_y: int = patch_size
+    v_max_x: int = sensor_size
+    v_max_y: int = sensor_size
     v_max_z: int = 0
 
     # Set during execution
