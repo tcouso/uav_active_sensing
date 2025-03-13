@@ -25,7 +25,7 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 200,  # Depends on environment
+    'steps_until_termination': 50,  # Depends on environment
     'interval_reward_assignment': 10,  # Depends on reward structure
     'num_samples': 3,  # Not standard PPO, ensure this is intentional
     'masking_ratio': 0.5,  # Task-dependent
