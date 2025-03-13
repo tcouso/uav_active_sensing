@@ -88,7 +88,7 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
     x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
 
     # sampled image
-    im_sampled = sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1)
+    im_sampled = torch.nan_to_num(sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1))
 
     # masked image
     im_masked = x * (1 - mask)
