@@ -32,7 +32,7 @@ class RewardFunction:
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
 
-        batch_reward = torch.zeros(self.num_samples, dtype=torch.float32)
+        rewards = torch.zeros(self.num_samples, dtype=torch.float32)
 
         for i in range(self.num_samples):
             masked_sampled_img = self.sampled_img_random_masking(sampled_img)
@@ -40,9 +40,9 @@ class RewardFunction:
                 outputs = self.model(img, masked_sampled_img)
             loss = outputs.loss
             reward_i = 1 / (1 + loss)
-            batch_reward[i] = reward_i
+            rewards[i] = reward_i
 
-        new_reward = batch_reward.sum().item()
+        new_reward = rewards.mean().item()
         if self.reward_increase:
             new_reward = new_reward - self.last_reward
             self.last_reward = new_reward
