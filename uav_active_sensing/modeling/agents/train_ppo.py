@@ -25,15 +25,16 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 50,  # Depends on environment
+    'steps_until_termination': 25,  # Depends on environment
     'interval_reward_assignment': 10,  # Depends on reward structure
-    'num_samples': 3,  # Not standard PPO, ensure this is intentional
+    'num_samples': 1,  # Not standard PPO, ensure this is intentional
     'masking_ratio': 0.5,  # Task-dependent
     'reward_increase': False,  # Custom logic, ensure it makes sense
     'sensor_size': 32,  # Task-dependent
     'patch_size': 16,  # Task-dependent
-    'learning_rate': 3e-4,  # Increased for stable PPO updates
+    'learning_rate': 1e-4,  # Increased for stable PPO updates
     'n_steps': 2048,  # Larger for better GAE estimation
+    'total_timesteps': 100_000,
     'batch_size': 128,  # More stable training, adjust based on memory
     'n_epochs': 10,  # More gradient updates per batch
     'clip_range': 0.2,  # Standard
@@ -304,8 +305,17 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         rd_agent = RandomAgent(env)
 
         for i, batch in enumerate(dataloader):
+            # MAE reward as reference
+            with torch.no_grad():
+                outputs = mae_model(batch)
+            loss = outputs.loss
+            mae_reward = 1 / (1 + loss)
+
+            mlflow.log_metric("train/mae_reward", mae_reward)
+
+            # Agent training
             ppo_vec_env.env_method("set_img", batch)
-            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+            ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
 
@@ -314,7 +324,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
         # Model evaluation
-        for i, batch in enumerate(dataloader):
+        for i, batch in enumerate(dataloader): # TODO: Change this to eval dataloader
             ppo_vec_env.env_method("set_img", batch)
 
             # MAE reward
@@ -334,6 +344,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 return_episode_rewards=False
             )
 
+            # Random agent
             rd_mean_reward, rd_std_reward = evaluate_policy(
                 rd_agent,
                 ppo_vec_env,
