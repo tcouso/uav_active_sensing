@@ -196,19 +196,19 @@ class ImageExplorationEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action: np.ndarray, eval: bool = False) -> Tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
         action = self._decode_action(action)
         self.move(action)
         observation = self._get_obs()
 
-        if (self._step_count % self._interval_reward_assignment == 0) and not eval:
+        if (self._step_count % self._interval_reward_assignment == 0) and (self._step_count > 0):
             reward = self._reward_function(self.img, self.sampled_img)
 
         else:
             reward = float(0)
 
-        terminated = self._step_count >= self.max_steps
         self._step_count += 1
+        terminated = self._step_count > self.max_steps
 
         truncated = False
         info = self._get_info()
