@@ -25,26 +25,27 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 200,
-    'interval_reward_assignment': 10,
-    'num_samples': 3,
-    'masking_ratio': 0.5,
-    'reward_increase': True,
-    'sensor_size': 32,
-    'patch_size': 16,
-    'learning_rate': 1e-5,
-    'n_steps': 128,
-    'batch_size': 32,
-    'n_epochs': 3,
-    'clip_range': 0.2,
-    'gamma': 0.99,
-    'policy': 'CnnPolicy',
-    'gae_lambda': 0.95,
-    'ent_coef': 0.01,
-    'vf_coef': 0.5,
-    'device': DEVICE,
-    'seed': 64553,
+    'steps_until_termination': 200,  # Depends on environment
+    'interval_reward_assignment': 10,  # Depends on reward structure
+    'num_samples': 3,  # Not standard PPO, ensure this is intentional
+    'masking_ratio': 0.5,  # Task-dependent
+    'reward_increase': False,  # Custom logic, ensure it makes sense
+    'sensor_size': 32,  # Task-dependent
+    'patch_size': 16,  # Task-dependent
+    'learning_rate': 3e-4,  # Increased for stable PPO updates
+    'n_steps': 2048,  # Larger for better GAE estimation
+    'batch_size': 128,  # More stable training, adjust based on memory
+    'n_epochs': 10,  # More gradient updates per batch
+    'clip_range': 0.2,  # Standard
+    'gamma': 0.99,  # Standard for long-term reward discounting
+    'policy': 'CnnPolicy',  # Ensure it's correct for your architecture
+    'gae_lambda': 0.95,  # Standard
+    'ent_coef': 0.01,  # Encourages exploration
+    'vf_coef': 0.5,  # Standard, balances value loss
+    'device': DEVICE,  # Assume CUDA if available
+    'seed': 64553,  # Ensures reproducibility
 }
+
 
 
 class RandomAgent(BaseAlgorithm):
@@ -146,9 +147,11 @@ def run_episode_and_visualize_sampling(
         )
         obs, _, done, _, _ = env.step(actions, eval=True)
 
+    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
     visualize_act_mae_reconstruction(
         env.img,
         env.sampled_img,
+        masked_sampled_img,
         act_mae_model,
         show=False,
         save_path=reconstruction_dir / f"{filename}_img={img_index}"
