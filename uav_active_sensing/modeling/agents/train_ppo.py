@@ -418,16 +418,16 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_tracking_uri("http://localhost:5000")
     param_space = {
         'steps_until_termination': 25,
-        'reward_increase': hp.choice('reward_increase', [True, False]),
-        'num_samples': hp.choice('num_samples', [1, 3]),
+        'reward_increase': False,
+        'num_samples': 1,
         'masking_ratio': 0.5,
         'sensor_size': 32,
         'patch_size': 16,
-        'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 25]),
+        'interval_reward_assignment': 25,
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
-        'total_timesteps': 25_000,
-        'batch_size': hp.choice('batch_size', [32, 64, 128]),
+        'n_steps': 512, 
+        'total_timesteps': 50_000,
+        'batch_size': hp.choice('batch_size', [64, 128]),
         'n_epochs': hp.choice('n_epochs', [3, 5]),
         'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
         'gamma': 0.99,
@@ -436,7 +436,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
         'policy': 'CnnPolicy',
         'vf_coef': 0.5,
         'device': DEVICE,
-        'seed': 64553,
+        'seed': hp.choice('seed', [64553, 23421, 43214, 53245]),
     }
 
     with mlflow.start_run():
@@ -445,7 +445,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
             fn=objective,
             space=param_space,
             algo=tpe.suggest,
-            max_evals=10,
+            max_evals=20,
             trials=trials,
         )
 
