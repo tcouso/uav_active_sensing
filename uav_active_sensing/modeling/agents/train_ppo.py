@@ -412,6 +412,27 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
         mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
 
 
+    # 'steps_until_termination': 25,  # Depends on environment
+    # 'interval_reward_assignment': 10,  # Depends on reward structure
+    # 'num_samples': 1,  # Not standard PPO, ensure this is intentional
+    # 'masking_ratio': 0.5,  # Task-dependent
+    # 'reward_increase': False,  # Custom logic, ensure it makes sense
+    # 'sensor_size': 32,  # Task-dependent
+    # 'patch_size': 16,  # Task-dependent
+    # 'learning_rate': 1e-4,  # Increased for stable PPO updates
+    # 'n_steps': 2048,  # Larger for better GAE estimation
+    # 'total_timesteps': 100_000,
+    # 'batch_size': 128,  # More stable training, adjust based on memory
+    # 'n_epochs': 10,  # More gradient updates per batch
+    # 'clip_range': 0.2,  # Standard
+    # 'gamma': 0.99,  # Standard for long-term reward discounting
+    # 'policy': 'CnnPolicy',  # Ensure it's correct for your architecture
+    # 'gae_lambda': 0.95,  # Standard
+    # 'ent_coef': 0.01,  # Encourages exploration
+    # 'vf_coef': 0.5,  # Standard, balances value loss
+    # 'device': DEVICE,  # Assume CUDA if available
+    # 'seed': 64553,  # Ensures reproducibility
+
 @app.command()
 def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
@@ -419,6 +440,10 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
     param_space = {
         'steps_until_termination': 25,
         'reward_increase': hp.choice('reward_increase', [True, False]),
+        'num_samples': hp.choice('num_samples', [1, 3]),
+        'masking_ratio': 0.5,
+        'sensor_size': 32,
+        'patch_size': 16,
         'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 25]),
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
         'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
