@@ -107,8 +107,8 @@ class ImageExplorationEnv(gym.Env):
             self.sensor_height = self.img_height // env_config.img_sensor_ratio
             self.sensor_width = self.img_width // env_config.img_sensor_ratio
         else:
-            self.sensor_height = env_config.patch_size
-            self.sensor_width = env_config.patch_size
+            self.sensor_height = env_config.sensor_size
+            self.sensor_width = env_config.sensor_size
 
         self._sensor_min_pos = torch.zeros((self.batch_size, 2), dtype=torch.int32)
 
