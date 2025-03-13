@@ -34,7 +34,7 @@ class RewardFunction:
 
         batch_reward = torch.zeros(self.num_samples, dtype=torch.float32)
 
-        for i in self.num_samples:
+        for i in range(self.num_samples):
             masked_sampled_img = self.sampled_img_random_masking(sampled_img)
             with torch.no_grad():
                 outputs = self.model(img, masked_sampled_img)
