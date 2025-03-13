@@ -246,7 +246,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=act_mae_config).to(DEVICE)
 
         reward_function = RewardFunction(act_mae_model,
-                                         num_sampled=params['num_samples'],
+                                         num_samples=params['num_samples'],
                                          reward_increase=params['reward_increase'],
                                          patch_size=params['patch_size'],
                                          generator=torch_generator,
