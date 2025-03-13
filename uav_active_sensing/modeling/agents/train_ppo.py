@@ -28,6 +28,7 @@ PPO_PARAMS = {
     'steps_until_termination': 200,
     'interval_reward_assignment': 10,
     'num_samples': 3,
+    'masking_ratio': 0.5,
     'reward_increase': True,
     'sensor_size': 32,
     'patch_size': 16,
@@ -249,6 +250,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          num_samples=params['num_samples'],
                                          reward_increase=params['reward_increase'],
                                          patch_size=params['patch_size'],
+                                         masking_ratio=params['masking_ratio'],
                                          generator=torch_generator,
                                          )
 

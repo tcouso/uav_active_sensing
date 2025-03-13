@@ -17,20 +17,25 @@ def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
 
 
 class RewardFunction:
-    def __init__(self, model: ActViTMAEForPreTraining, num_samples: int, patch_size: int, generator: torch.Generator, reward_increase: bool):
+    def __init__(self, model: ActViTMAEForPreTraining,
+                 num_samples: int, patch_size: int,
+                 masking_ratio: float,
+                 generator: torch.Generator,
+                 reward_increase: bool):
         self.model = model
         self.num_samples = num_samples
+        self.masking_ratio = masking_ratio
         self.generator = generator
         self.patch_size = patch_size
         self.reward_increase = reward_increase
         self.last_reward = 0
 
-    def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor, masking_ratio: float) -> float:
+    def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
 
         batch_reward = torch.zeros(self.num_samples, dtype=torch.float32)
 
         for i in self.num_samples:
-            masked_sampled_img = self.sampled_img_random_masking(sampled_img, masking_ratio=masking_ratio)
+            masked_sampled_img = self.sampled_img_random_masking(sampled_img)
             with torch.no_grad():
                 outputs = self.model(img, masked_sampled_img)
             loss = outputs.loss
@@ -44,7 +49,7 @@ class RewardFunction:
 
         return new_reward
 
-    def sampled_img_random_masking(self, sampled_img: torch.Tensor, masking_ratio: float) -> torch.Tensor:
+    def sampled_img_random_masking(self, sampled_img: torch.Tensor) -> torch.Tensor:
 
         B, C, H, W = sampled_img.shape
         x = torch.clone(sampled_img)
@@ -60,7 +65,7 @@ class RewardFunction:
         valid_indices = torch.nonzero(valid_patches, as_tuple=True)
 
         num_valid = valid_indices[0].shape[0]  # Count of valid patches, error
-        num_to_mask = int(masking_ratio * num_valid)  # Number of patches to mask
+        num_to_mask = int(self.masking_ratio * num_valid)  # Number of patches to mask
 
         mask_indices = torch.randperm(num_valid, generator=self.generator)[:num_to_mask]
         selected_patches = tuple(idx[mask_indices] for idx in valid_indices)  # Extract selected patch indices
