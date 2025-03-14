@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 from dataclasses import dataclass
 
 import numpy as np
@@ -9,6 +9,8 @@ from gymnasium import spaces
 
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
+
+# TODO: Remove batch size logic
 
 
 def make_kernel_size_odd(t: torch.Tensor) -> torch.Tensor:
@@ -141,13 +143,28 @@ class ImageExplorationEnv(gym.Env):
         self._reward_function = env_config.reward_function
         self._interval_reward_assignment = env_config.interval_reward_assignment
 
-        self.observation_space = spaces.Box(
-            low=-3.0,  # Bounds are a conservative estimate based on ImageNet images normalization params
-            high=3.0,
-            shape=(self.batch_size, 3, 224, 224),
-            dtype=np.float32,
-            seed=self.seed
-        )
+        # self.observation_space = spaces.Box(
+        #     low=-3.0,  # Bounds are a conservative estimate based on ImageNet images normalization params
+        #     high=3.0,
+        #     shape=(self.batch_size, 3, 224, 224),
+        #     dtype=np.float32,
+        #     seed=self.seed
+        # )
+
+        self.observation_space = spaces.Dict({
+            'sampled_img': spaces.Box(
+                low=-3.0,  # Bounds are a conservative estimate based on ImageNet images normalization params
+                high=3.0,
+                shape=(self.batch_size, 3, 224, 224),
+                dtype=np.float32,
+                seed=self.seed
+            ),
+            'pos': spaces.Box(low=np.array([0, 0]),
+                              high=np.array([self.img_height - 1, self.img_width - 1]),
+                              shape=(2,),
+                              dtype=int)
+
+        })
         self.action_space = spaces.Discrete(6)
 
     def _decode_action(self, action: int) -> np.ndarray:
@@ -160,9 +177,15 @@ class ImageExplorationEnv(gym.Env):
 
         return move
 
-    def _get_obs(self) -> np.ndarray:
+    def _get_obs(self) -> Dict[np.ndarray, np.ndarray]:
 
-        obs = torch.nan_to_num(self.sampled_img, nan=0.0).cpu().numpy()
+        sampled_img = torch.nan_to_num(self.sampled_img, nan=0.0).cpu().numpy()
+        pos = self.__sensor_pos.cpu().numpy().flatten()
+
+        obs = {
+            'sampled_img': sampled_img,
+            'pos': pos
+        }
 
         return obs
 
@@ -171,7 +194,7 @@ class ImageExplorationEnv(gym.Env):
 
         return info
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict[np.ndarray, np.ndarray], Dict]:
         if seed != None:
             super().reset(seed=seed, options=options)
 
@@ -196,7 +219,7 @@ class ImageExplorationEnv(gym.Env):
 
         return observation, info
 
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
+    def step(self, action: np.ndarray) -> Tuple[Dict[np.ndarray, np.ndarray], float, bool, bool, Dict]:
         action = self._decode_action(action)
         self.move(action)
         observation = self._get_obs()
