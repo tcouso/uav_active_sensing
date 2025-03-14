@@ -25,21 +25,26 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 200,
-    'interval_reward_assignment': 10,
-    'reward_increase': True,
-    'learning_rate': 1e-5,
-    'n_steps': 128,
-    'batch_size': 32,
-    'n_epochs': 3,
-    'clip_range': 0.2,
-    'gamma': 0.99,
-    'policy': 'CnnPolicy',
-    'gae_lambda': 0.95,
-    'ent_coef': 0.01,
-    'vf_coef': 0.5,
-    'device': DEVICE,
-    'seed': 64553,
+    'steps_until_termination': 25,  # Depends on environment
+    'interval_reward_assignment': 10,  # Depends on reward structure
+    'num_samples': 1,  # Not standard PPO, ensure this is intentional
+    'masking_ratio': 0.5,  # Task-dependent
+    'reward_increase': False,  # Custom logic, ensure it makes sense
+    'sensor_size': 32,  # Task-dependent
+    'patch_size': 16,  # Task-dependent
+    'learning_rate': 1e-4,  # Increased for stable PPO updates
+    'n_steps': 2048,  # Larger for better GAE estimation
+    'total_timesteps': 100_000,
+    'batch_size': 128,  # More stable training, adjust based on memory
+    'n_epochs': 10,  # More gradient updates per batch
+    'clip_range': 0.2,  # Standard
+    'gamma': 0.99,  # Standard for long-term reward discounting
+    'policy': 'CnnPolicy',  # Ensure it's correct for your architecture
+    'gae_lambda': 0.95,  # Standard
+    'ent_coef': 0.01,  # Encourages exploration
+    'vf_coef': 0.5,  # Standard, balances value loss
+    'device': DEVICE,  # Assume CUDA if available
+    'seed': 64553,  # Ensures reproducibility
 }
 
 
@@ -80,19 +85,6 @@ class SingleImageDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.image, self.label
-
-
-class ImgReconstructinoCallback(BaseCallback):
-
-    def __init__(self, img_reconstruction_period: int):
-        super().__init__()
-        self.img_reconstruction_period: int = img_reconstruction_period
-
-    def _on_step(self) -> True:
-        if self.num_timesteps % self.img_reconstruction_period == 0:
-            # Image reconstruction
-            pass
-        return True
 
 
 class MLflowOutputFormat(KVWriter):
@@ -142,9 +134,11 @@ def run_episode_and_visualize_sampling(
         )
         obs, _, done, _, _ = env.step(actions, eval=True)
 
+    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
     visualize_act_mae_reconstruction(
         env.img,
         env.sampled_img,
+        masked_sampled_img,
         act_mae_model,
         show=False,
         save_path=reconstruction_dir / f"{filename}_img={img_index}"
@@ -177,7 +171,7 @@ class ImgReconstructinoCallback(BaseCallback):
 
     def _on_step(self) -> True:
         if self.num_timesteps % self.img_reconstruction_period == 0:
-            # Image reconstruction
+
             run_episode_and_visualize_sampling(
                 agent=self.model,
                 env=self.env,
@@ -235,19 +229,27 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Pretrained model and reward function
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         mae_config.seed = seed
+        mae_config.patch_size = params['patch_size']
         mae_model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=mae_config).to(DEVICE)
 
         act_mae_config = ActViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         act_mae_config.seed = seed
         act_mae_model = ActViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base", config=act_mae_config).to(DEVICE)
 
-        reward_function = RewardFunction(act_mae_model, reward_increase=params['reward_increase'])
+        reward_function = RewardFunction(act_mae_model,
+                                         num_samples=params['num_samples'],
+                                         reward_increase=params['reward_increase'],
+                                         patch_size=params['patch_size'],
+                                         masking_ratio=params['masking_ratio'],
+                                         generator=torch_generator,
+                                         )
 
         # Take one image as a dummy input for env initialization
         dummy_batch = next(iter(dataloader))
         env_config = ImageExplorationEnvConfig(img=dummy_batch,
                                                steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
+                                               sensor_size=params['sensor_size'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )
@@ -258,7 +260,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             normalize_images=False
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=10_000,
+            img_reconstruction_period=2_500,
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -289,8 +291,17 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         rd_agent = RandomAgent(env)
 
         for i, batch in enumerate(dataloader):
+            # MAE reward as reference
+            with torch.no_grad():
+                outputs = mae_model(batch)
+            loss = outputs.loss
+            mae_reward = 1 / (1 + loss)
+
+            mlflow.log_metric("train/mae_reward", mae_reward)
+
+            # Agent training
             ppo_vec_env.env_method("set_img", batch)
-            ppo_agent.learn(total_timesteps=100 * params['n_steps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+            ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
 
@@ -299,7 +310,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
         # Model evaluation
-        for i, batch in enumerate(dataloader):
+        for i, batch in enumerate(dataloader):  # TODO: Change this to eval dataloader
             ppo_vec_env.env_method("set_img", batch)
 
             # MAE reward
@@ -319,6 +330,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 return_episode_rewards=False
             )
 
+            # Random agent
             rd_mean_reward, rd_std_reward = evaluate_policy(
                 rd_agent,
                 ppo_vec_env,
@@ -335,6 +347,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
             # Example episodes visualization
             for j in range(10):
+
                 run_episode_and_visualize_sampling(
                     ppo_agent,
                     env,
@@ -399,27 +412,31 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
         mlflow.log_metric("eval/mean_reward", best_run["loss"])
         mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
 
-
 @app.command()
 def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
     param_space = {
-        'steps_until_termination': hp.choice('steps_until_termination', [100, 125, 150]),
-        'reward_increase': hp.choice('reward_increase', [True, False]),
-        'interval_reward_assignment': hp.choice('interval_reward_assignment', [1, 5, 10, 15]),
+        'steps_until_termination': 25,
+        'reward_increase': False,
+        'num_samples': 1,
+        'masking_ratio': 0.5,
+        'sensor_size': 32,
+        'patch_size': 16,
+        'interval_reward_assignment': 25,
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': hp.choice('n_steps', [256, 512, 1024]),  # Larger n_steps for smoother updates
-        'batch_size': hp.choice('batch_size', [32, 64, 128]),
-        'n_epochs': hp.choice('n_epochs', [3, 5, 10]),
+        'n_steps': 512, 
+        'total_timesteps': 50_000,
+        'batch_size': hp.choice('batch_size', [64, 128]),
+        'n_epochs': hp.choice('n_epochs', [3, 5]),
         'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
-        'gamma': hp.choice('gamma', [0.95, 0.99]),  # Slightly lower gamma encourages more exploration
+        'gamma': 0.99,
         'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
         'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
         'policy': 'CnnPolicy',
         'vf_coef': 0.5,
         'device': DEVICE,
-        'seed': 64553,
+        'seed': hp.choice('seed', [64553, 23421, 43214, 53245]),
     }
 
     with mlflow.start_run():
@@ -428,7 +445,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
             fn=objective,
             space=param_space,
             algo=tpe.suggest,
-            max_evals=16,
+            max_evals=20,
             trials=trials,
         )
 

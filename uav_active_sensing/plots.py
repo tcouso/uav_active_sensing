@@ -33,7 +33,7 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
 
     x = torch.einsum('nchw->nhwc', pixel_values).detach().cpu()
-    
+
     # masked image
     im_masked = x * (1 - mask)
 
@@ -66,9 +66,16 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
         plt.close()  # Close to free memory when not displaying
 
 
-def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_values: torch.Tensor, model: ActViTMAEForPreTraining, save_path: Path = None, show: bool = True):
+def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
+                                     sampled_pixel_values: torch.Tensor,
+                                     masked_sampled_pixel_values: torch.Tensor,
+                                     model: ActViTMAEForPreTraining,
+                                     save_path: Path = None,
+                                     show: bool = True
+                                     ):
+
     # forward pass
-    outputs = model(pixel_values, sampled_pixel_values)
+    outputs = model(pixel_values, masked_sampled_pixel_values)
     y = model.unpatchify(outputs.logits)
     y = torch.einsum("nchw->nhwc", y).detach().cpu()
 
@@ -81,7 +88,7 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor, sampled_pixel_v
     x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
 
     # sampled image
-    im_sampled = sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1)
+    im_sampled = torch.nan_to_num(sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1))
 
     # masked image
     im_masked = x * (1 - mask)
