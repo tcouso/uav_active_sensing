@@ -34,7 +34,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 2048,
-    'total_timesteps': 100_000,
+    'total_timesteps': 80_000,
     'batch_size': 128,
     'n_epochs': 10,
     'clip_range': 0.2,
@@ -311,7 +311,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Model evaluation
         for i, batch in enumerate(dataloader):  # TODO: Change this to eval dataloader
-            ppo_vec_env.env_method("set_img", batch)
+            ppo_vec_env.env_method("set_img", batch[0])
 
             # MAE reward
             with torch.no_grad():
