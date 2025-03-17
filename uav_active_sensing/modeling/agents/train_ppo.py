@@ -3,17 +3,19 @@ import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple, Optional
+from typing import Dict, Union, Any, Tuple, Optional, Callable
 import mlflow
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoImageProcessor, ViTMAEForPreTraining
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagenet_collate_fn
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
@@ -36,6 +38,7 @@ PPO_PARAMS = {
     'n_steps': 2048,
     'total_timesteps': 80_000,
     'batch_size': 128,
+    'num_envs': 64,
     'n_epochs': 10,
     'clip_range': 0.2,
     'gamma': 0.99,
@@ -45,7 +48,19 @@ PPO_PARAMS = {
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 64553,
+    'img_reconstruction_period': 2_500
 }
+
+
+class ImageEnvFactory:
+    def __init__(self, images: torch.Tensor, env_config: ImageExplorationEnvConfig):
+        self.images = images
+        self.env_config = env_config
+
+    def __call__(self, env_idx: int) -> Callable:
+        def _init():
+            return ImageExplorationEnv(self.images[env_idx], self.env_config)
+        return _init
 
 
 class RandomAgent(BaseAlgorithm):
@@ -107,8 +122,9 @@ class MLflowOutputFormat(KVWriter):
                     mlflow.log_metric(key, value, step)
 
 
+# TODO: Make this work in vectorized version
 def run_episode_and_visualize_sampling(
-    agent,
+    agent: PPO,
     env: ImageExplorationEnv,
     deterministic: bool,
     act_mae_model: ActViTMAEForPreTraining,
@@ -149,6 +165,7 @@ def run_episode_and_visualize_sampling(
         )
 
 
+# TODO: Make this work with vectorized version
 class ImgReconstructinoCallback(BaseCallback):
     def __init__(self, img_reconstruction_period: int,
                  env: ImageExplorationEnv,
@@ -182,6 +199,7 @@ class ImgReconstructinoCallback(BaseCallback):
 
 
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
+
     if experiment_name is not None:
         mlflow.set_experiment(experiment_name)
 
@@ -209,18 +227,23 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         torch_generator = torch.Generator().manual_seed(seed)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
         tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
+        tiny_imagenet_val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
-        # Single image experiment
-        rd.seed(seed)
-        random_index = rd.randint(0, len(tiny_imagenet_train_dataset) - 1)
-        single_image_dataset = SingleImageDataset(tiny_imagenet_train_dataset, random_index)
+        train_dataloader = DataLoader(tiny_imagenet_train_dataset,
+                                      batch_size=params['num_envs'],
+                                      collate_fn=tiny_imagenet_collate_fn,
+                                      generator=torch_generator,
+                                      shuffle=True)
+        num_train_img_batches = len(tiny_imagenet_train_dataset) // params['num_envs']
 
-        # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
-        dataloader = DataLoader(single_image_dataset,
-                                batch_size=1,
-                                collate_fn=tiny_imagenet_collate_fn,
-                                generator=torch_generator,
-                                shuffle=True)
+        assert params['total_timesteps'] > num_train_img_batches, "Total training timesteps must be greater than num of img batches"
+
+        val_dataloader = DataLoader(tiny_imagenet_val_dataset,
+                                    batch_size=params['num_envs'],
+                                    collate_fn=tiny_imagenet_collate_fn,
+                                    generator=torch_generator,
+                                    shuffle=True)
+        num_val_img_batches = len(tiny_imagenet_val_dataset) // params['num_envs']
 
         # Pretrained model and reward function
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
@@ -241,7 +264,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          )
 
         # Take one image as a dummy input for env initialization
-        dummy_batch = next(iter(dataloader))
+        dummy_batch = next(iter(train_dataloader))
         env_config = ImageExplorationEnvConfig(steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
                                                sensor_size=params['sensor_size'],
@@ -249,14 +272,16 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                                seed=seed
                                                )
 
-        env = ImageExplorationEnv(dummy_batch[0], env_config)
+        # env = ImageExplorationEnv(dummy_batch[0], env_config)
+        factory = ImageEnvFactory(dummy_batch, env_config)
+        env = DummyVecEnv([factory(i) for i in range(params['num_envs'])])
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(resnet_features_dim=512, pos_features_dim=64),
             normalize_images=False
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=2_500,
+            img_reconstruction_period=params['img_reconstruction_period'],
             env=env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
@@ -281,23 +306,26 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             output_formats=[HumanOutputFormat(sys.stdout), MLflowOutputFormat()],
         )
         ppo_agent.set_logger(ppo_agent_logger)
-        ppo_vec_env = ppo_agent.get_env()
 
         # Random agent
         rd_agent = RandomAgent(env)
 
-        for i, batch in enumerate(dataloader):
+        for i, batch in enumerate(train_dataloader):
             # MAE reward as reference
             with torch.no_grad():
                 outputs = mae_model(batch)
             loss = outputs.loss
             mae_reward = 1 / (1 + loss)
-
             mlflow.log_metric("train/mae_reward", mae_reward)
 
             # Agent training
-            ppo_vec_env.env_method("set_img", batch[0])  # TODO: Vectorize this for full batch training
-            ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+            for j in range(batch.shape[0]):
+                env.env_method("set_img",
+                               batch[j],
+                               indices=j)
+            ppo_agent.learn(total_timesteps=params['total_timesteps'] // num_train_img_batches,
+                            log_interval=1,
+                            callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
 
@@ -306,8 +334,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
         # Model evaluation
-        for i, batch in enumerate(dataloader):  # TODO: Change this to eval dataloader
-            ppo_vec_env.env_method("set_img", batch[0])
+        for i, batch in enumerate(val_dataloader):
 
             # MAE reward
             with torch.no_grad():
@@ -317,10 +344,15 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
             mlflow.log_metric("eval/mae_reward", mae_reward)
 
+            for j in range(batch.shape[0]):
+                env.env_method("set_img",
+                               batch[j],
+                               indices=j)
+
             # Trained agent
             mean_reward, std_reward = evaluate_policy(
                 ppo_agent,
-                ppo_vec_env,
+                ppo_agent.get_env(),
                 n_eval_episodes=5,
                 deterministic=True,
                 return_episode_rewards=False
@@ -329,7 +361,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             # Random agent
             rd_mean_reward, rd_std_reward = evaluate_policy(
                 rd_agent,
-                ppo_vec_env,
+                ppo_agent.get_env(),
                 n_eval_episodes=5,
                 deterministic=False,
                 return_episode_rewards=False
@@ -342,6 +374,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             mlflow.log_metric("eval/rd_std_reward", rd_std_reward)
 
             # Example episodes visualization
+            # TODO: Make this work with vectorized envs
             for j in range(10):
 
                 run_episode_and_visualize_sampling(
@@ -405,8 +438,8 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
 
         # Log the best parameters, loss, and model
         mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", best_run["loss"])
-        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
+        mlflow.log_metric("eval/mean_reward", -best_run["loss"])
+        mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
 
 @app.command()
@@ -414,26 +447,26 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
     param_space = {
-        'steps_until_termination': 25,
+        'steps_until_termination': 16,
         'reward_increase': False,
         'num_samples': 1,
         'masking_ratio': 0.5,
         'sensor_size': 32,
         'patch_size': 16,
-        'interval_reward_assignment': 25,
+        'interval_reward_assignment': 16,
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': 512,
-        'total_timesteps': 50_000,
+        'n_steps': 2048,
+        'total_timesteps': 80_000,
         'batch_size': hp.choice('batch_size', [64, 128]),
-        'n_epochs': hp.choice('n_epochs', [3, 5]),
-        'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
+        'n_epochs': 10,
+        'clip_range': hp.uniform('clip_range', 0.2, 0.4),
         'gamma': 0.99,
-        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
-        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
+        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),
+        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),
         'policy': 'CnnPolicy',
         'vf_coef': 0.5,
         'device': DEVICE,
-        'seed': hp.choice('seed', [64553, 23421, 43214, 53245]),
+        'seed': 64533,
     }
 
     with mlflow.start_run():

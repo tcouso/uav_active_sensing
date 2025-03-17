@@ -182,7 +182,7 @@ class ImageExplorationEnv(gym.Env):
 
         obs = {
             'sampled_img': sampled_img,
-            'pos': np.expand_dims(pos, axis=0) 
+            'pos': pos
         }
 
         return obs
