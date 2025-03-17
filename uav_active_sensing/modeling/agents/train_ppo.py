@@ -132,7 +132,7 @@ def run_episode_and_visualize_sampling(
             obs,
             deterministic=deterministic,
         )
-        obs, _, done, _, _ = env.step(actions, eval=True)
+        obs, _, done, _, _ = env.step(actions)
 
     masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
     visualize_act_mae_reconstruction(
