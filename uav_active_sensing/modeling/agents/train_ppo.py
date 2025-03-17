@@ -286,24 +286,24 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Random agent
         rd_agent = RandomAgent(env)
 
-        # for i, batch in enumerate(dataloader):
-        #     # MAE reward as reference
-        #     with torch.no_grad():
-        #         outputs = mae_model(batch)
-        #     loss = outputs.loss
-        #     mae_reward = 1 / (1 + loss)
+        for i, batch in enumerate(dataloader):
+            # MAE reward as reference
+            with torch.no_grad():
+                outputs = mae_model(batch)
+            loss = outputs.loss
+            mae_reward = 1 / (1 + loss)
 
-        #     mlflow.log_metric("train/mae_reward", mae_reward)
+            mlflow.log_metric("train/mae_reward", mae_reward)
 
-        #     # Agent training
-        #     ppo_vec_env.env_method("set_img", batch[0])  # TODO: Vectorize this for full batch training
-        #     ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+            # Agent training
+            ppo_vec_env.env_method("set_img", batch[0])  # TODO: Vectorize this for full batch training
+            ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
-        # ppo_agent.save(models_dir / "ppo_model.zip")
+        ppo_agent.save(models_dir / "ppo_model.zip")
 
-        # # Register the model in MLflow Model Registry
-        # model_uri = f"runs:/{run_id}/models"
-        # mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
+        # Register the model in MLflow Model Registry
+        model_uri = f"runs:/{run_id}/models"
+        mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
         # Model evaluation
         for i, batch in enumerate(dataloader):  # TODO: Change this to eval dataloader
