@@ -17,6 +17,13 @@ def tiny_imagenet_collate_fn(batch):
     return torch.cat(processed_batch, dim=0)
 
 
+# def tiny_imagenet_collate_fn(batch):
+
+#     processed_batch = [image.to(DEVICE) for (image, _) in batch]
+
+#     return torch.stack(processed_batch)
+
+
 class TinyImageNetDataset(Dataset):
     def __init__(self, root_dir=EXTERNAL_DATA_DIR / "tiny-imagenet-200", split=None, transform=None):
         """
@@ -62,5 +69,3 @@ class TinyImageNetDataset(Dataset):
             img = self.transform(img)
 
         return img, label
-
-

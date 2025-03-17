@@ -39,7 +39,7 @@ PPO_PARAMS = {
     'n_epochs': 10,  # More gradient updates per batch
     'clip_range': 0.2,  # Standard
     'gamma': 0.99,  # Standard for long-term reward discounting
-    'policy': 'CnnPolicy',  # Ensure it's correct for your architecture
+    'policy': 'MultiInputPolicy',  # Ensure it's correct for your architecture
     'gae_lambda': 0.95,  # Standard
     'ent_coef': 0.01,  # Encourages exploration
     'vf_coef': 0.5,  # Standard, balances value loss
@@ -136,9 +136,9 @@ def run_episode_and_visualize_sampling(
 
     masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
     visualize_act_mae_reconstruction(
-        env.img,
-        env.sampled_img,
-        masked_sampled_img,
+        env.img.unsqueeze(0),
+        env.sampled_img.unsqueeze(0),
+        masked_sampled_img.unsqueeze(0),
         act_mae_model,
         show=False,
         save_path=reconstruction_dir / f"{filename}_img={img_index}"
@@ -146,7 +146,7 @@ def run_episode_and_visualize_sampling(
 
     if mae_model is not None:
         visualize_mae_reconstruction(
-            env.img,
+            env.img.unsqueeze(0),
             mae_model,
             show=False,
             save_path=reconstruction_dir / f"mae_reconstruction_img={img_index}"
@@ -246,17 +246,17 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Take one image as a dummy input for env initialization
         dummy_batch = next(iter(dataloader))
-        env_config = ImageExplorationEnvConfig(img=dummy_batch,
-                                               steps_until_termination=params['steps_until_termination'],
+        env_config = ImageExplorationEnvConfig(steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
                                                sensor_size=params['sensor_size'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )
-        env = ImageExplorationEnv(env_config)
+
+        env = ImageExplorationEnv(dummy_batch[0], env_config)
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
-            features_extractor_kwargs=dict(features_dim=512),
+            features_extractor_kwargs=dict(resnet_features_dim=512, pos_features_dim=64),
             normalize_images=False
         )
         img_reconstruction_callback = ImgReconstructinoCallback(
@@ -300,7 +300,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             mlflow.log_metric("train/mae_reward", mae_reward)
 
             # Agent training
-            ppo_vec_env.env_method("set_img", batch)
+            ppo_vec_env.env_method("set_img", batch[0]) # TODO: Vectorize this for full batch training
             ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
@@ -412,6 +412,7 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
         mlflow.log_metric("eval/mean_reward", best_run["loss"])
         mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
 
+
 @app.command()
 def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
@@ -425,7 +426,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
         'patch_size': 16,
         'interval_reward_assignment': 25,
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': 512, 
+        'n_steps': 512,
         'total_timesteps': 50_000,
         'batch_size': hp.choice('batch_size', [64, 128]),
         'n_epochs': hp.choice('n_epochs', [3, 5]),
