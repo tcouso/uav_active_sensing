@@ -25,26 +25,26 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 app = typer.Typer()
 
 PPO_PARAMS = {
-    'steps_until_termination': 25,  # Depends on environment
-    'interval_reward_assignment': 10,  # Depends on reward structure
-    'num_samples': 1,  # Not standard PPO, ensure this is intentional
-    'masking_ratio': 0.5,  # Task-dependent
-    'reward_increase': False,  # Custom logic, ensure it makes sense
-    'sensor_size': 32,  # Task-dependent
-    'patch_size': 16,  # Task-dependent
-    'learning_rate': 1e-4,  # Increased for stable PPO updates
-    'n_steps': 2048,  # Larger for better GAE estimation
+    'steps_until_termination': 16,
+    'interval_reward_assignment': 16,
+    'num_samples': 1,
+    'masking_ratio': 0.5,
+    'reward_increase': False,
+    'sensor_size': 3 * 16,
+    'patch_size': 16,
+    'learning_rate': 1e-4,
+    'n_steps': 2048,
     'total_timesteps': 100_000,
-    'batch_size': 128,  # More stable training, adjust based on memory
-    'n_epochs': 10,  # More gradient updates per batch
-    'clip_range': 0.2,  # Standard
-    'gamma': 0.99,  # Standard for long-term reward discounting
-    'policy': 'MultiInputPolicy',  # Ensure it's correct for your architecture
-    'gae_lambda': 0.95,  # Standard
-    'ent_coef': 0.01,  # Encourages exploration
-    'vf_coef': 0.5,  # Standard, balances value loss
-    'device': DEVICE,  # Assume CUDA if available
-    'seed': 64553,  # Ensures reproducibility
+    'batch_size': 128,
+    'n_epochs': 10,
+    'clip_range': 0.2,
+    'gamma': 0.99,
+    'policy': 'MultiInputPolicy',
+    'gae_lambda': 0.95,
+    'ent_coef': 0.01,
+    'vf_coef': 0.5,
+    'device': DEVICE,
+    'seed': 64553,
 }
 
 
@@ -300,7 +300,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             mlflow.log_metric("train/mae_reward", mae_reward)
 
             # Agent training
-            ppo_vec_env.env_method("set_img", batch[0]) # TODO: Vectorize this for full batch training
+            ppo_vec_env.env_method("set_img", batch[0])  # TODO: Vectorize this for full batch training
             ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
 
         ppo_agent.save(models_dir / "ppo_model.zip")
