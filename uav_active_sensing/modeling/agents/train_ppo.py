@@ -60,7 +60,7 @@ class RandomAgent(BaseAlgorithm):
                 deterministic: bool = False):
 
         _, _, _, _ = observation, state, episode_start, deterministic
-        action = self.action_space.sample()
+        action = [self.action_space.sample()]
 
         return action, None
 
