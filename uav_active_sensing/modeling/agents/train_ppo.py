@@ -37,7 +37,7 @@ PPO_PARAMS = {
     'learning_rate': 1e-4,
     'n_steps': 128,
     'total_timesteps': 1 * 16 * 100_000,  # 100000 images in tinyimagenet, 16 steps per image for an episode, 1 episodes
-    'batch_size': 128 * 4,
+    'batch_size': 2 * 128 * 4,
     'num_envs': 4,
     'n_epochs': 3,
     'clip_range': 0.2,
@@ -149,7 +149,6 @@ class MLflowOutputFormat(KVWriter):
         key_excluded: Dict[str, Union[str, Tuple[str, ...]]],
         step: int = 0,
     ) -> None:
-        print("Logging metrics at step", step, key_values)
         for (key, value), (_, excluded) in zip(
             sorted(key_values.items()), sorted(key_excluded.items())
         ):
