@@ -3,7 +3,7 @@ import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple, Optional, Callable
+from typing import Dict, Union, Any, Tuple, Callable
 import mlflow
 import numpy as np
 import torch
@@ -14,8 +14,8 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
 
 from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagenet_collate_fn
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
@@ -51,50 +51,56 @@ PPO_PARAMS = {
     'img_reconstruction_period': 2_500
 }
 
+# DEBUG_PPO_PARAMS = {
+#     'steps_until_termination': 16,
+#     'interval_reward_assignment': 16,
+#     'num_samples': 1,
+#     'masking_ratio': 0.5,
+#     'reward_increase': False,
+#     'sensor_size': 3 * 16,
+#     'patch_size': 16,
+#     'learning_rate': 1e-4,
+#     'n_steps': 64,
+#     'total_timesteps': 80_000,
+#     'batch_size': 32,
+#     'num_envs': 2,
+#     'n_epochs': 1,
+#     'clip_range': 0.2,
+#     'gamma': 0.99,
+#     'policy': 'MultiInputPolicy',
+#     'gae_lambda': 0.95,
+#     'ent_coef': 0.01,
+#     'vf_coef': 0.5,
+#     'device': DEVICE,
+#     'seed': 64553,
+#     'img_reconstruction_period': 2_500
+# }
+
 
 class ImageEnvFactory:
-    def __init__(self, images: torch.Tensor, env_config: ImageExplorationEnvConfig):
+    def __init__(self, images: torch.Tensor,
+                 log_dir: Path,
+                 env_config: ImageExplorationEnvConfig):
         self.images = images
+        self.log_dir = log_dir
         self.env_config = env_config
 
     def __call__(self, env_idx: int) -> Callable:
         def _init():
-            return ImageExplorationEnv(self.images[env_idx], self.env_config)
+            return Monitor(ImageExplorationEnv(self.images[env_idx], self.env_config), self.log_dir)
         return _init
 
 
-class RandomAgent(BaseAlgorithm):
-    def __init__(self, env: ImageExplorationEnv):
-        super().__init__(policy=None, env=env, learning_rate=0)
-        self.action_space = env.action_space
-
-    def predict(self,
-                observation: Union[np.ndarray, dict[str, np.ndarray]],
-                state: Optional[tuple[np.ndarray, ...]] = None,
-                episode_start: Optional[np.ndarray] = None,
-                deterministic: bool = False):
-
-        _, _, _, _ = observation, state, episode_start, deterministic
-        action = [self.action_space.sample()]
-
-        return action, None
-
-    def learn(self, *args, **kwargs):  # Dummy learn method
-
-        pass
-
-    def _setup_model(self):
-        pass
-
-
 class SingleImageDataset(Dataset):
-    def __init__(self, original_dataset: Dataset, index: int):
+    def __init__(self,
+                 original_dataset: Dataset, index: int):
         self.image, self.label = original_dataset[index]
 
     def __len__(self):
         return 1
 
     def __getitem__(self, idx):
+        _ = idx
         return self.image, self.label
 
 
@@ -122,7 +128,6 @@ class MLflowOutputFormat(KVWriter):
                     mlflow.log_metric(key, value, step)
 
 
-# TODO: Make this work in vectorized version
 def run_episode_and_visualize_sampling(
     agent: PPO,
     env: ImageExplorationEnv,
@@ -131,7 +136,6 @@ def run_episode_and_visualize_sampling(
     reconstruction_dir: Path,
     filename: str,
     img_index: int,
-    mae_model: ViTMAEForPreTraining = None,
 ):
     """
     Runs one episode with the given agent and environment, then visualizes the reconstructions.
@@ -147,6 +151,7 @@ def run_episode_and_visualize_sampling(
         obs, _, done, _, _ = env.step(actions)
 
     masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
+
     visualize_act_mae_reconstruction(
         env.img.unsqueeze(0),
         env.sampled_img.unsqueeze(0),
@@ -156,38 +161,28 @@ def run_episode_and_visualize_sampling(
         save_path=reconstruction_dir / f"{filename}_img={img_index}"
     )
 
-    if mae_model is not None:
-        visualize_mae_reconstruction(
-            env.img.unsqueeze(0),
-            mae_model,
-            show=False,
-            save_path=reconstruction_dir / f"mae_reconstruction_img={img_index}"
-        )
 
-
-# TODO: Make this work with vectorized version
 class ImgReconstructinoCallback(BaseCallback):
     def __init__(self, img_reconstruction_period: int,
-                 env: ImageExplorationEnv,
                  act_mae_model: ActViTMAEForPreTraining,
-                 mae_model: ViTMAEForPreTraining,
                  reconstruction_dir: Path,
                  deterministic: bool = False):
 
         super().__init__()
         self.img_reconstruction_period: int = img_reconstruction_period
-        self.env = env
         self.act_mae_model = act_mae_model
-        self.mae_model = mae_model
         self.reconstruction_dir = reconstruction_dir
         self.deterministic = deterministic
 
     def _on_step(self) -> True:
         if self.num_timesteps % self.img_reconstruction_period == 0:
+            vec_env = self.model.get_env()
+            selected_idx = rd.randint(0, vec_env.num_envs - 1)
+            sample_env = vec_env.envs[selected_idx].env
 
             run_episode_and_visualize_sampling(
                 agent=self.model,
-                env=self.env,
+                env=sample_env,
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
                 reconstruction_dir=self.reconstruction_dir,
@@ -205,7 +200,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
     with mlflow.start_run(nested=nested):
         mlflow.transformers.autolog(disable=True)
-        # mlflow.sklearn.autolog(disable=True)
         mlflow.autolog()
 
         run_id = mlflow.active_run().info.run_id
@@ -243,7 +237,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                     collate_fn=tiny_imagenet_collate_fn,
                                     generator=torch_generator,
                                     shuffle=True)
-        num_val_img_batches = len(tiny_imagenet_val_dataset) // params['num_envs']
 
         # Pretrained model and reward function
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
@@ -272,17 +265,17 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                                seed=seed
                                                )
 
-        # env = ImageExplorationEnv(dummy_batch[0], env_config)
-        factory = ImageEnvFactory(dummy_batch, env_config)
-        env = DummyVecEnv([factory(i) for i in range(params['num_envs'])])
+        factory = ImageEnvFactory(dummy_batch, log_dir=str(logs_dir), env_config=env_config)
+        vec_env = DummyVecEnv([factory(i) for i in range(params['num_envs'])])
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(resnet_features_dim=512, pos_features_dim=64),
             normalize_images=False
         )
+
         img_reconstruction_callback = ImgReconstructinoCallback(
             img_reconstruction_period=params['img_reconstruction_period'],
-            env=env,
+            env=vec_env,
             act_mae_model=act_mae_model,
             mae_model=mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
@@ -292,7 +285,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # PPO agent
         ppo_agent = PPO(
             params['policy'],
-            env,
+            vec_env,
             policy_kwargs=ppo_agent_policy_kwargs,
             device=params['device'],
             seed=seed,
@@ -307,11 +300,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(ppo_agent_logger)
 
-        # Random agent
-        rd_agent = RandomAgent(env)
-
         for i, batch in enumerate(train_dataloader):
-            # MAE reward as reference
+            # MAE reward as performance reference
             with torch.no_grad():
                 outputs = mae_model(batch)
             loss = outputs.loss
@@ -320,9 +310,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
             # Agent training
             for j in range(batch.shape[0]):
-                env.env_method("set_img",
-                               batch[j],
-                               indices=j)
+                vec_env.env_method("set_img",
+                                   batch[j],
+                                   indices=j)
             ppo_agent.learn(total_timesteps=params['total_timesteps'] // num_train_img_batches,
                             log_interval=1,
                             callback=img_reconstruction_callback)
@@ -336,7 +326,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Model evaluation
         for i, batch in enumerate(val_dataloader):
 
-            # MAE reward
+            # Sample image of batch for visualization
+            selected_idx = rd.randint(0, vec_env.num_envs - 1)
+            sample_env = vec_env.envs[selected_idx].env
+
+            # Regular MAE
             with torch.no_grad():
                 outputs = mae_model(batch)
             loss = outputs.loss
@@ -344,60 +338,38 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
             mlflow.log_metric("eval/mae_reward", mae_reward)
 
-            for j in range(batch.shape[0]):
-                env.env_method("set_img",
-                               batch[j],
-                               indices=j)
+            visualize_mae_reconstruction(
+                sample_env.img.unsqueeze(0),
+                mae_model,
+                show=False,
+                save_path=eval_img_reconstruction_dir / f"mae_reconstruction_img={i}"
+            )
 
-            # Trained agent
+            # Reward MAE
+            for j in range(batch.shape[0]):
+                vec_env.env_method("set_img",
+                                   batch[j],
+                                   indices=j)
+
             mean_reward, std_reward = evaluate_policy(
                 ppo_agent,
-                ppo_agent.get_env(),
+                vec_env,
                 n_eval_episodes=5,
                 deterministic=True,
                 return_episode_rewards=False
             )
-
-            # Random agent
-            rd_mean_reward, rd_std_reward = evaluate_policy(
-                rd_agent,
-                ppo_agent.get_env(),
-                n_eval_episodes=5,
-                deterministic=False,
-                return_episode_rewards=False
-            )
-
             mlflow.log_metric("eval/mean_reward", mean_reward)
             mlflow.log_metric("eval/std_reward", std_reward)
 
-            mlflow.log_metric("eval/rd_mean_reward", rd_mean_reward)
-            mlflow.log_metric("eval/rd_std_reward", rd_std_reward)
-
-            # Example episodes visualization
-            # TODO: Make this work with vectorized envs
-            for j in range(10):
-
-                run_episode_and_visualize_sampling(
-                    ppo_agent,
-                    env,
-                    deterministic=True,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    filename=f"ppo_agent_trial={j}",
-                    reconstruction_dir=eval_img_reconstruction_dir,
-                    img_index=i,
-                )
-
-                run_episode_and_visualize_sampling(
-                    rd_agent,
-                    env,
-                    deterministic=True,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    filename=f"rd_agent_trial={j}",
-                    reconstruction_dir=eval_img_reconstruction_dir,
-                    img_index=i,
-                )
+            run_episode_and_visualize_sampling(
+                ppo_agent,
+                sample_env,
+                deterministic=True,
+                act_mae_model=act_mae_model,
+                filename=f"ppo_agent_trial={j}",
+                reconstruction_dir=eval_img_reconstruction_dir,
+                img_index=i,
+            )
 
         return {'loss': -mean_reward,
                 'loss_variance': -std_reward,
