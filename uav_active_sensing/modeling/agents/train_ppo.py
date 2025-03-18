@@ -36,7 +36,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 128,
-    'total_timesteps': 100_000,
+    'total_timesteps': 2 * 16 * 100_000,  # 100000 images in tinyimagenet, 16 steps per image for an episode, 2 episodes
     'batch_size': 128,
     'num_envs': 16,
     'n_epochs': 10,
@@ -77,6 +77,40 @@ PPO_PARAMS = {
 # }
 
 
+def run_episode_and_visualize_sampling(
+    agent: PPO,
+    env: ImageExplorationEnv,
+    deterministic: bool,
+    act_mae_model: ActViTMAEForPreTraining,
+    reconstruction_dir: Path,
+    filename: str,
+    img_index: int,
+):
+    """
+    Runs one episode with the given agent and environment, then visualizes the reconstructions.
+    """
+    obs, _ = env.reset()
+    done = False
+
+    while not done:
+        actions, _ = agent.predict(
+            obs,
+            deterministic=deterministic,
+        )
+        obs, _, done, _, _ = env.step(actions)
+
+    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
+
+    visualize_act_mae_reconstruction(
+        env.img.unsqueeze(0),
+        env.sampled_img.unsqueeze(0),
+        masked_sampled_img.unsqueeze(0),
+        act_mae_model,
+        show=False,
+        save_path=reconstruction_dir / f"{filename}_img={img_index}"
+    )
+
+
 class ImageEnvFactory:
     def __init__(self, images: torch.Tensor,
                  log_dir: Path,
@@ -115,7 +149,7 @@ class MLflowOutputFormat(KVWriter):
         key_excluded: Dict[str, Union[str, Tuple[str, ...]]],
         step: int = 0,
     ) -> None:
-
+        print("Logging metrics at step", step, key_values)
         for (key, value), (_, excluded) in zip(
             sorted(key_values.items()), sorted(key_excluded.items())
         ):
@@ -126,40 +160,6 @@ class MLflowOutputFormat(KVWriter):
             if isinstance(value, np.ScalarType):
                 if not isinstance(value, str):
                     mlflow.log_metric(key, value, step)
-
-
-def run_episode_and_visualize_sampling(
-    agent: PPO,
-    env: ImageExplorationEnv,
-    deterministic: bool,
-    act_mae_model: ActViTMAEForPreTraining,
-    reconstruction_dir: Path,
-    filename: str,
-    img_index: int,
-):
-    """
-    Runs one episode with the given agent and environment, then visualizes the reconstructions.
-    """
-    obs, _ = env.reset()
-    done = False
-
-    while not done:
-        actions, _ = agent.predict(
-            obs,
-            deterministic=deterministic,
-        )
-        obs, _, done, _, _ = env.step(actions)
-
-    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
-
-    visualize_act_mae_reconstruction(
-        env.img.unsqueeze(0),
-        env.sampled_img.unsqueeze(0),
-        masked_sampled_img.unsqueeze(0),
-        act_mae_model,
-        show=False,
-        save_path=reconstruction_dir / f"{filename}_img={img_index}"
-    )
 
 
 class ImgReconstructinoCallback(BaseCallback):
