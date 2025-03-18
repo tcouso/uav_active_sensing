@@ -37,9 +37,9 @@ PPO_PARAMS = {
     'learning_rate': 1e-4,
     'n_steps': 128,
     'total_timesteps': 1 * 16 * 100_000,  # 100000 images in tinyimagenet, 16 steps per image for an episode, 1 episodes
-    'batch_size': 128,
-    'num_envs': 2,
-    'n_epochs': 10,
+    'batch_size': 128 * 4,
+    'num_envs': 4,
+    'n_epochs': 3,
     'clip_range': 0.2,
     'gamma': 0.99,
     'policy': 'MultiInputPolicy',
