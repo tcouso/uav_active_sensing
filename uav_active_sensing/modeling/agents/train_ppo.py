@@ -275,9 +275,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         img_reconstruction_callback = ImgReconstructinoCallback(
             img_reconstruction_period=params['img_reconstruction_period'],
-            env=vec_env,
             act_mae_model=act_mae_model,
-            mae_model=mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
         )
         mlflow.log_params(params)
