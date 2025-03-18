@@ -121,7 +121,7 @@ class ImageEnvFactory:
 
     def __call__(self, env_idx: int) -> Callable:
         def _init():
-            return ImageExplorationEnv(self.images[env_idx], self.env_config), self.log_dir
+            return ImageExplorationEnv(self.images[env_idx], self.env_config)
         return _init
 
 
