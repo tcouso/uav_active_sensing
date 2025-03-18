@@ -113,7 +113,7 @@ def run_episode_and_visualize_sampling(
 
 class ImageEnvFactory:
     def __init__(self, images: torch.Tensor,
-                 log_dir: Path,
+                 log_dir: str,
                  env_config: ImageExplorationEnvConfig):
         self.images = images
         self.log_dir = log_dir
@@ -121,7 +121,7 @@ class ImageEnvFactory:
 
     def __call__(self, env_idx: int) -> Callable:
         def _init():
-            return Monitor(ImageExplorationEnv(self.images[env_idx], self.env_config), self.log_dir)
+            return ImageExplorationEnv(self.images[env_idx], self.env_config), self.log_dir
         return _init
 
 
@@ -177,7 +177,7 @@ class ImgReconstructinoCallback(BaseCallback):
         if self.num_timesteps % self.img_reconstruction_period == 0:
             vec_env = self.model.get_env()
             selected_idx = rd.randint(0, vec_env.num_envs - 1)
-            sample_env = vec_env.envs[selected_idx].env
+            sample_env = vec_env.envs[selected_idx]
 
             run_episode_and_visualize_sampling(
                 agent=self.model,
@@ -325,7 +325,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
             # Sample image of batch for visualization
             selected_idx = rd.randint(0, vec_env.num_envs - 1)
-            sample_env = vec_env.envs[selected_idx].env
+            sample_env = vec_env.envs[selected_idx]
 
             # Regular MAE
             with torch.no_grad():
