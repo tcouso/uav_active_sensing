@@ -36,9 +36,9 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 48,
-    'total_timesteps': 48 * 32 * 3,
-    'batch_size': 48 * 32,
-    'num_envs': 32,
+    'total_timesteps': 48 * 16 * 3,
+    'batch_size': 48 * 16,
+    'num_envs': 16,
     'n_epochs': 3,
     'clip_range': 0.2,
     'gamma': 0.99,
@@ -48,7 +48,7 @@ PPO_PARAMS = {
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 64553,
-    'img_reconstruction_period': 2_500
+    'img_reconstruction_period': 10_000
 }
 
 
