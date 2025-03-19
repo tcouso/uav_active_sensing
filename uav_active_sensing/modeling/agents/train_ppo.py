@@ -36,7 +36,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 48,
-    'total_timesteps': 2 * 48 * 16 * 3,
+    'total_timesteps': 48 * 16 * 3,
     'batch_size': 48 * 16,
     'num_envs': 16,
     'n_epochs': 3,
@@ -202,9 +202,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                       collate_fn=tiny_imagenet_collate_fn,
                                       generator=torch_generator,
                                       shuffle=True)
-        num_train_img_batches = len(tiny_imagenet_train_dataset) // params['num_envs']
-
-        assert params['total_timesteps'] > num_train_img_batches, "Total training timesteps must be greater than num of img batches"
 
         val_dataloader = DataLoader(tiny_imagenet_val_dataset,
                                     batch_size=params['num_envs'],
@@ -287,7 +284,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                    indices=j)
             ppo_agent.learn(
                 total_timesteps=params['total_timesteps'],
-                # callback=img_reconstruction_callback
+                callback=img_reconstruction_callback
             )
 
         ppo_agent.save(models_dir / "ppo_model.zip")
