@@ -310,8 +310,10 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 vec_env.env_method("set_img",
                                    batch[j],
                                    indices=j)
-            ppo_agent.learn(total_timesteps=params['total_timesteps'] // num_train_img_batches,
-                            callback=img_reconstruction_callback)
+            ppo_agent.learn(
+                total_timesteps=params['total_timesteps'] // num_train_img_batches,
+                # callback=img_reconstruction_callback
+            )
 
         ppo_agent.save(models_dir / "ppo_model.zip")
 
