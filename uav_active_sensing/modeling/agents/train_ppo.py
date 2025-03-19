@@ -36,7 +36,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 128,
-    'total_timesteps': 4 * 128 * 16,  # timesteps per batch, 100000 images in tinyimagenet
+    'total_timesteps': 100_000,  # timesteps per batch, 100000 images in tinyimagenet
     'batch_size': 128 * 4,
     'num_envs': 4,
     'n_epochs': 3,
