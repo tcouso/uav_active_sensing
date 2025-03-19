@@ -36,7 +36,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 128,
-    'total_timesteps': 1 * 16 * 100_000,  # 100000 images in tinyimagenet, 16 steps per image for an episode, 1 episodes
+    'total_timesteps': 4 * 128 * 16,  # timesteps per batch, 100000 images in tinyimagenet
     'batch_size': 128 * 4,
     'num_envs': 4,
     'n_epochs': 3,
@@ -311,7 +311,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                    batch[j],
                                    indices=j)
             ppo_agent.learn(
-                total_timesteps=params['total_timesteps'] // num_train_img_batches,
+                total_timesteps=params['total_timesteps'],
                 # callback=img_reconstruction_callback
             )
 
