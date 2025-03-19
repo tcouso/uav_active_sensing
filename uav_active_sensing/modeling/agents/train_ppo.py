@@ -35,10 +35,10 @@ PPO_PARAMS = {
     'sensor_size': 3 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
-    'n_steps': 128,
-    'total_timesteps': 1_000_000,  # timesteps per batch, 100000 images in tinyimagenet
-    'batch_size': 128 * 4,
-    'num_envs': 4,
+    'n_steps': 48,
+    'total_timesteps': 48 * 32 * 3,
+    'batch_size': 48 * 32,
+    'num_envs': 32,
     'n_epochs': 3,
     'clip_range': 0.2,
     'gamma': 0.99,
@@ -50,31 +50,6 @@ PPO_PARAMS = {
     'seed': 64553,
     'img_reconstruction_period': 2_500
 }
-
-# DEBUG_PPO_PARAMS = {
-#     'steps_until_termination': 16,
-#     'interval_reward_assignment': 16,
-#     'num_samples': 1,
-#     'masking_ratio': 0.5,
-#     'reward_increase': False,
-#     'sensor_size': 3 * 16,
-#     'patch_size': 16,
-#     'learning_rate': 1e-4,
-#     'n_steps': 64,
-#     'total_timesteps': 80_000,
-#     'batch_size': 32,
-#     'num_envs': 2,
-#     'n_epochs': 1,
-#     'clip_range': 0.2,
-#     'gamma': 0.99,
-#     'policy': 'MultiInputPolicy',
-#     'gae_lambda': 0.95,
-#     'ent_coef': 0.01,
-#     'vf_coef': 0.5,
-#     'device': DEVICE,
-#     'seed': 64553,
-#     'img_reconstruction_period': 2_500
-# }
 
 
 def run_episode_and_visualize_sampling(
