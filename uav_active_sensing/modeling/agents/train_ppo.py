@@ -315,7 +315,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
 
         # Validation environment
-        val_env = ImageExplorationEnv(small_val_dataset, params['seed'], env_config)
+        val_env = ImageExplorationEnv(small_val_dataset, seed, env_config)
 
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
