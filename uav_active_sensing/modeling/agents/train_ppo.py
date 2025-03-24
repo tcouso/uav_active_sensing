@@ -232,37 +232,6 @@ class ImgReconstructinoCallback(BaseCallback):
         return True
 
 
-# class ImgChangeCallback(BaseCallback):
-#     def __init__(self, img_change_period: int, img_dataloader: DataLoader):
-#         """Callback for updating the image of the exploration environment.
-
-#         Args:
-#             img_change_period (int): number of steps between env image update.
-#             img_dataloader (DataLoader): Dataloader of the env images.
-#         """
-#         super().__init__()
-#         self.img_change_period = img_change_period
-#         self.img_dataloader = img_dataloader
-#         self.img_iterator = iter(img_dataloader)
-
-#     def _on_step(self) -> True:        # Commented out for debugging
-
-#         if self.num_timesteps % self.img_change_period == 0:
-#             try:
-#                 new_batch = next(self.img_iterator)
-#             except StopIteration:
-#                 self.img_iterator = iter(self.img_dataloader)
-#                 new_batch = next(self.img_iterator)
-
-#             vec_env = self.model.get_env()
-
-#             # Update each environment with its new image
-#             for j in range(new_batch.shape[0]):
-#                 vec_env.env_method("set_img", new_batch[j], indices=j)
-
-#         return True
-
-
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
 
     if experiment_name is not None:
@@ -299,14 +268,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = ImageDatasetSample(train_dataset, 20)
-        small_val_dataset = ImageDatasetSample(val_dataset, 5)
-
-        # train_dataloader = DataLoader(small_train_dataset,
-        #                               batch_size=params['num_envs'],
-        #                               collate_fn=tiny_imagenet_collate_fn,
-        #                               generator=torch_generator,
-        #                               shuffle=True)
+        small_train_dataset = ImageDatasetSample(train_dataset, 1)
+        # small_val_dataset = ImageDatasetSample(val_dataset, 5)
+        small_val_dataset = small_train_dataset  # Single image exp
 
         val_dataloader = DataLoader(small_val_dataset,
                                     batch_size=params['num_envs'],
@@ -332,16 +296,12 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          mask_sample=params['mask_sample'],
                                          generator=torch_generator,
                                          )
-
-        # Take one image as a dummy input for env initialization
-        # dummy_batch = next(iter(train_dataloader))
         env_config = ImageExplorationEnvConfig(steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
                                                sensor_size=params['sensor_size'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )
-
         factory = ImageEnvFactory(log_dir=str(logs_dir), env_config=env_config)
         dataset_list = partition_dataset(small_train_dataset, params['num_envs'])
         train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
@@ -364,25 +324,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             reconstruction_dir=train_img_reconstruction_dir,
             deterministic=False,
         )
-        # img_change_train_callback = ImgChangeCallback(
-        #     img_change_period=params['img_change_period'],
-        #     img_dataloader=train_dataloader,
-        # )
-        # callback_list_train = CallbackList([img_reconstruction_train_callback, img_change_train_callback])
-
-        # img_reconstruction_val_callback = ImgReconstructinoCallback(
-        #     img_reconstruction_period=params['img_reconstruction_period'],
-        #     mask_sample=params['mask_sample'],
-        #     mae_model=mae_model,
-        #     act_mae_model=act_mae_model,
-        #     reconstruction_dir=train_img_reconstruction_dir,
-        #     deterministic=True,
-        # )
-        # img_change_val_callback = ImgChangeCallback(
-        #     img_change_period=params['img_change_period'],
-        #     img_dataloader=val_dataloader,
-        # )
-        # callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
 
         # PPO agent definition
         ppo_agent = PPO(
@@ -442,14 +383,8 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mlflow.log_metric("eval/mean_reward", mean_reward)
         mlflow.log_metric("eval/std_reward", std_reward)
 
-        # img_reconstruction_period=params['img_reconstruction_period'],
-        #     mask_sample=params['mask_sample'],
-        #     mae_model=mae_model,
-        #     act_mae_model=act_mae_model,
-        #     reconstruction_dir=train_img_reconstruction_dir,
-        #     deterministic=True,
-
-        # TODO: Get some samples for visualization
+        # Trained agent sampling visualization
+        val_env.reset()
         for i in range(20):
             run_episode_and_visualize_sampling(
                 agent=ppo_agent,
@@ -462,7 +397,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 img_index=i,
             )
             visualize_mae_reconstruction(
-                val_env.img,
+                val_env.img.unsqueeze(0),
                 mae_model,
                 show=False,
                 save_path=val_img_reconstruction_dir / f"mae_reconstruction_img={i}"
