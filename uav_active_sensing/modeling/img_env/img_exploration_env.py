@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+# from torch.utils.data import DataLoader
+
 import gymnasium as gym
 from gymnasium import spaces
 
@@ -11,6 +13,36 @@ from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
 
 
+
+# class ImgChangeCallback(BaseCallback):
+#     def __init__(self, img_change_period: int, img_dataloader: DataLoader):
+#         """Callback for updating the image of the exploration environment.
+
+#         Args:
+#             img_change_period (int): number of steps between env image update.
+#             img_dataloader (DataLoader): Dataloader of the env images.
+#         """
+#         super().__init__()
+#         self.img_change_period = img_change_period
+#         self.img_dataloader = img_dataloader
+#         self.img_iterator = iter(img_dataloader)
+
+#     def _on_step(self) -> True:
+#         if self.num_timesteps % self.img_change_period == 0:
+#             try:
+#                 new_batch = next(self.img_iterator)
+#             except StopIteration:
+#                 self.img_iterator = iter(self.img_dataloader)
+#                 new_batch = next(self.img_iterator)
+
+#             vec_env = self.model.get_env()
+
+#             # Update each environment with its new image
+#             for j in range(new_batch.shape[0]):
+#                 vec_env.env_method("set_img", new_batch[j], indices=j)
+
+#         return True
+    
 def make_kernel_size_odd(n: int) -> int:
 
     if n % 2 == 1:
@@ -113,11 +145,11 @@ class ImageExplorationEnvConfig:
 
 class ImageExplorationEnv(gym.Env):
 
-    def __init__(self, img: torch.Tensor, env_config: ImageExplorationEnvConfig) -> None:
+    def __init__(self, img: torch.Tensor, seed: int, env_config: ImageExplorationEnvConfig) -> None:
         super().__init__()
-        assert len(img.shape) == 3, "Image needs to be a 3-d tensor"
+        assert len(img.shape) == 3, "Image needs to be a 3d tensor"
         self.device = env_config.device
-        self.seed = env_config.seed
+        self.seed = seed
         self.generator = torch.Generator().manual_seed(self.seed)
         self.img = img
         self.img_h, self.img_w = self.img.shape[1:]
