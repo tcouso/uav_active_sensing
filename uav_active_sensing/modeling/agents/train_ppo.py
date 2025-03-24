@@ -255,7 +255,7 @@ class ImgChangeCallable:
         Called with the current locals and globals from the evaluation loop.
         Updates the environment images every img_change_period steps.
         """
-        _ = local_vars
+        _ = global_vars
         self.step_counter += 1
         if self.step_counter % self.img_change_period == 0:
             try:
@@ -265,9 +265,9 @@ class ImgChangeCallable:
                 new_batch = next(self.img_iterator)
 
             # Expect the environment to be defined in globals as "env" and to be a vectorized env
-            vec_env = global_vars.get("env", None)
+            vec_env = local_vars.get("env", None)
             if vec_env is None:
-                raise ValueError("Environment ('env') not found in globals.")
+                raise ValueError("Environment ('env') not found in locals.")
 
             for j in range(new_batch.shape[0]):
                 vec_env.env_method("set_img", new_batch[j], indices=j)
