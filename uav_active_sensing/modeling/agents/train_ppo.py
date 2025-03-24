@@ -131,8 +131,6 @@ def evaluate_policy_with_callback_list(
     """
     if isinstance(callback, list):
         callback = CallbackList(callback)
-    if callback is not None:
-        callback.on_eval_start()
 
     episode_rewards: List[float] = []
     episode_lengths: List[int] = []
@@ -157,9 +155,6 @@ def evaluate_policy_with_callback_list(
 
         if reward_threshold is not None and episode_reward >= reward_threshold:
             break
-
-    if callback is not None:
-        callback.on_eval_end()
 
     if return_episode_rewards:
         return episode_rewards, episode_lengths
