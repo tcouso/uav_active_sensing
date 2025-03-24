@@ -180,7 +180,7 @@ class ImageEnvFactory:
             return Monitor(ImageExplorationEnv(
                 img=self.images[env_idx],
                 seed=self.env_config.seed + env_idx,  # Different seeds for each env
-                config=self.env_config), self.log_dir
+                env_config=self.env_config), self.log_dir
             )
         return _init
 
