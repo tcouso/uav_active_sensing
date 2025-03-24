@@ -163,7 +163,7 @@ class MLflowOutputFormat(KVWriter):
                     mlflow.log_metric(key, value, step)
 
 
-# Callbacks
+# Training callbacks
 class ImgReconstructinoCallback(BaseCallback):
     def __init__(self,
                  img_reconstruction_period: int,
@@ -236,6 +236,41 @@ class ImgChangeCallback(BaseCallback):
                 vec_env.env_method("set_img", new_batch[j], indices=j)
 
         return True
+
+# Evaluation callback
+class ImgChangeCallable:
+    def __init__(self, img_change_period: int, img_dataloader: DataLoader):
+        """
+        Args:
+            img_change_period (int): Number of steps between image updates.
+            img_dataloader (DataLoader): Dataloader for the environment images.
+        """
+        self.img_change_period = img_change_period
+        self.img_dataloader = img_dataloader
+        self.img_iterator = iter(img_dataloader)
+        self.step_counter = 0
+
+    def __call__(self, local_vars: Dict[str, Any], global_vars: Dict[str, Any]) -> None:
+        """
+        Called with the current locals and globals from the evaluation loop.
+        Updates the environment images every img_change_period steps.
+        """
+        _ = local_vars
+        self.step_counter += 1
+        if self.step_counter % self.img_change_period == 0:
+            try:
+                new_batch = next(self.img_iterator)
+            except StopIteration:
+                self.img_iterator = iter(self.img_dataloader)
+                new_batch = next(self.img_iterator)
+
+            # Expect the environment to be defined in globals as "env" and to be a vectorized env
+            vec_env = global_vars.get("env", None)
+            if vec_env is None:
+                raise ValueError("Environment ('env') not found in globals.")
+
+            for j in range(new_batch.shape[0]):
+                vec_env.env_method("set_img", new_batch[j], indices=j)
 
 
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
@@ -354,14 +389,6 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # )
         # callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
 
-        # TODO: Define eval callback (callable) for image reconstruction and image change
-        def eval_callback(local_vars: dict, global_vars: dict) -> None:
-            import pprint
-            print("\n--- Locals ---")
-            pprint.pprint(local_vars)  # Pretty-print local variables
-            print("\n--- Globals ---")
-            pprint.pprint(global_vars)  # Pretty-print global variables
-
 
         # PPO agent definition
         ppo_agent = PPO(
@@ -384,7 +411,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Commented out for debugging
         # # Training
         # ppo_agent.learn(
-        #     total_timesteps=params['total_timesteps'], 
+        #     total_timesteps=params['total_timesteps'],
         #     callback=callback_list_train,
         # )
 
@@ -417,7 +444,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_eval_episodes=len(small_val_dataset),
             deterministic=True,
             return_episode_rewards=False,
-            callback=eval_callback
+            callback=ImgChangeCallable(16, val_dataloader)
         )
 
         # TODO: Get some sampling examples
