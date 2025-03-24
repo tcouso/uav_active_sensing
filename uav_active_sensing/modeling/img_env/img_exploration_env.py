@@ -217,7 +217,6 @@ class ImageExplorationEnv(gym.Env):
             self.iterator = iter(self.dataloader)
             new_img = next(self.iterator)
 
-        print(new_img.shape)
 
         self.img = new_img
 
