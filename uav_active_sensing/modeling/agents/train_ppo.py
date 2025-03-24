@@ -3,10 +3,9 @@ import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple, Callable, Optional, List
+from typing import Dict, Union, Any, Tuple, Callable
 
 import mlflow
-import gymnasium as gym
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -14,11 +13,10 @@ from transformers import AutoImageProcessor, ViTMAEForPreTraining
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
-# from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
-from stable_baselines3.common.base_class import BaseAlgorithm
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.evaluation import evaluate_policy
 
 from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagenet_collate_fn
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
@@ -101,65 +99,6 @@ def run_episode_and_visualize_sampling(
             show=False,
             save_path=reconstruction_dir / f"{filename}_img={img_index}"
         )
-
-
-def evaluate_policy_with_callback_list(
-    model: BaseAlgorithm,
-    env: gym.Env,
-    n_eval_episodes: int = 10,
-    callback: Optional[Union[BaseCallback, List[BaseCallback]]] = None,
-    reward_threshold: Optional[float] = None,
-    return_episode_rewards: bool = False,
-    deterministic: bool = True,
-    render: bool = False,
-) -> Union[Tuple[float, float], Tuple[List[float], List[int]]]:
-    """
-    Evaluate a policy using a callback list.
-
-    Args:
-        model: Trained RL model.
-        env: Evaluation environment.
-        n_eval_episodes: Number of evaluation episodes.
-        callback: Single or list of callbacks.
-        reward_threshold: Early stopping threshold.
-        return_episode_rewards: If True, returns rewards and episode lengths.
-        deterministic: Whether to use deterministic actions.
-        render: Whether to render the environment.
-
-    Returns:
-        (mean_reward, std_reward) or (episode_rewards, episode_lengths)
-    """
-    if isinstance(callback, list):
-        callback = CallbackList(callback)
-
-    episode_rewards: List[float] = []
-    episode_lengths: List[int] = []
-    for _ in range(n_eval_episodes):
-        obs = env.reset()
-        done = False
-        episode_reward = 0.0
-        episode_length = 0
-
-        while not done:
-            if callback is not None and callback.on_step() is False:
-                break
-            action, _ = model.predict(obs, deterministic=deterministic)
-            obs, reward, done, _ = env.step(action)
-            episode_reward += reward
-            episode_length += 1
-            if render:
-                env.render()
-
-        episode_rewards.append(episode_reward)
-        episode_lengths.append(episode_length)
-
-        if reward_threshold is not None and episode_reward >= reward_threshold:
-            break
-
-    if return_episode_rewards:
-        return episode_rewards, episode_lengths
-
-    return float(np.mean(episode_rewards)), float(np.std(episode_rewards))
 
 
 class ImageEnvFactory:
@@ -436,7 +375,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Commented out for debugging
         # # Training
         # ppo_agent.learn(
-        #     total_timesteps=params['total_timesteps'],
+        #     total_timesteps=params['total_timesteps'], 
         #     callback=callback_list_train,
         # )
 
@@ -463,14 +402,17 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mlflow.log_metric("eval/mae_reward", sum_reward / num_val_batches)
 
         # Reward MAE evaluation
-        mean_reward, std_reward = evaluate_policy_with_callback_list(
+        mean_reward, std_reward = evaluate_policy(
             ppo_agent,
             vec_env,
-            n_eval_episodes=5,  # TODO: This should change according to val dataset length
+            n_eval_episodes=len(small_val_dataset),
             deterministic=True,
             return_episode_rewards=False,
-            callback=callback_list_val
+            callback=img_change_val_callback
         )
+
+        # TODO: Get some sampling examples
+
         mlflow.log_metric("eval/mean_reward", mean_reward)
         mlflow.log_metric("eval/std_reward", std_reward)
 
