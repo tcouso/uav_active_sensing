@@ -33,7 +33,7 @@ PPO_PARAMS = {
     'num_samples': 1,
     'masking_ratio': 0.5,
     'reward_increase': False,
-    'mask_sample': False,
+    'mask_sample': True,
     'sensor_size': 3 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
@@ -168,6 +168,7 @@ class ImageDatasetSample(Dataset):
         # Access the original dataset using the randomly sampled indices
         sampled_idx = self.indices[idx]
         img, label = self.original_dataset[sampled_idx]
+        
         return img, label
 
 
