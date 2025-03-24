@@ -36,9 +36,9 @@ PPO_PARAMS = {
     'sensor_size': 3 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
-    'n_steps': 48,
+    'n_steps': 2048,
     'total_timesteps': 100_000,
-    'batch_size': 48 * 4,
+    'batch_size': 128 * 1,
     'num_envs': 1,
     'n_epochs': 3,
     'img_change_period': 16,  # Change image every episode to provide greater generalization
