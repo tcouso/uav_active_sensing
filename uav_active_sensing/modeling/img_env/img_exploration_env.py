@@ -10,8 +10,6 @@ from gymnasium import spaces
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
 
-# TODO: Remove batch size logic
-
 
 def make_kernel_size_odd(n: int) -> int:
 
@@ -28,13 +26,16 @@ class RewardFunction:
                  patch_size: int,
                  masking_ratio: float,
                  generator: torch.Generator,
-                 reward_increase: bool):
+                 reward_increase: bool,
+                 mask_sample: bool,
+                 ):
         self.model = model
         self.num_samples = num_samples
         self.masking_ratio = masking_ratio
         self.generator = generator
         self.patch_size = patch_size
         self.reward_increase = reward_increase
+        self.mask_sample = mask_sample
         self.last_reward = 0
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
@@ -42,11 +43,16 @@ class RewardFunction:
         rewards = torch.zeros(self.num_samples, dtype=torch.float32)
 
         for i in range(self.num_samples):
-            masked_sampled_img = self.sampled_img_random_masking(sampled_img)
+            if self.mask_sample:
+                masked_img = self.sampled_img_random_masking(sampled_img)
+            else:
+                masked_img = sampled_img
+
             with torch.no_grad():
                 outputs = self.model(
                     img.unsqueeze(0),
-                    masked_sampled_img.unsqueeze(0))
+                    masked_img.unsqueeze(0)
+                )
             loss = outputs.loss
             reward_i = 1 / (1 + loss)
             rewards[i] = reward_i

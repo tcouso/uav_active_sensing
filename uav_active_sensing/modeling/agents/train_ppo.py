@@ -32,13 +32,14 @@ PPO_PARAMS = {
     'num_samples': 1,
     'masking_ratio': 0.5,
     'reward_increase': False,
+    'mask_sample': False,
     'sensor_size': 3 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 48,
-    'total_timesteps': 48 * 16 * 3 * int(10_000 / 16),
-    'batch_size': 48 * 16,
-    'num_envs': 4,
+    'total_timesteps': 100_000,
+    'batch_size': 48 * 4,
+    'num_envs': 1,
     'n_epochs': 3,
     'img_change_period': 16,  # Change image every episode to provide greater generalization
     'clip_range': 0.2,
@@ -57,6 +58,7 @@ def run_episode_and_visualize_sampling(
     agent: PPO,
     env: ImageExplorationEnv,
     deterministic: bool,
+    mask_sample: bool,
     act_mae_model: ActViTMAEForPreTraining,
     reconstruction_dir: Path,
     filename: str,
@@ -77,14 +79,24 @@ def run_episode_and_visualize_sampling(
 
     masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
 
-    visualize_act_mae_reconstruction(
-        env.img.unsqueeze(0),
-        env.sampled_img.unsqueeze(0),
-        masked_sampled_img.unsqueeze(0),
-        act_mae_model,
-        show=False,
-        save_path=reconstruction_dir / f"{filename}_img={img_index}"
-    )
+    if mask_sample:
+        visualize_act_mae_reconstruction(
+            env.img.unsqueeze(0),
+            env.sampled_img.unsqueeze(0),
+            masked_sampled_img.unsqueeze(0),
+            act_mae_model,
+            show=False,
+            save_path=reconstruction_dir / f"{filename}_img={img_index}"
+        )
+    else:  # Sampled image is equal to masked image
+        visualize_act_mae_reconstruction(
+            env.img.unsqueeze(0),
+            env.sampled_img.unsqueeze(0),
+            env.sampled_img.unsqueeze(0),
+            act_mae_model,
+            show=False,
+            save_path=reconstruction_dir / f"{filename}_img={img_index}"
+        )
 
 
 class ImageEnvFactory:
@@ -153,6 +165,7 @@ class ImgReconstructinoCallback(BaseCallback):
                  act_mae_model: ActViTMAEForPreTraining,
                  reconstruction_dir: Path,
                  deterministic: bool = False,
+                 mask_sample: bool = False,
                  ):
 
         super().__init__()
@@ -161,6 +174,7 @@ class ImgReconstructinoCallback(BaseCallback):
         self.act_mae_model = act_mae_model
         self.reconstruction_dir = reconstruction_dir
         self.deterministic = deterministic
+        self.mask_sample = mask_sample
 
     def _on_step(self) -> True:
         if self.num_timesteps % self.img_reconstruction_period == 0:
@@ -174,10 +188,10 @@ class ImgReconstructinoCallback(BaseCallback):
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
                 reconstruction_dir=self.reconstruction_dir,
+                mask_sample=self.mask_sample,
                 filename="ppo_agent",
                 img_index=self.num_timesteps,
             )
-
             visualize_mae_reconstruction(
                 sample_env.img.unsqueeze(0),
                 self.mae_model,
@@ -254,8 +268,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = SmallImageDataset(train_dataset, 10)
-        small_val_dataset = SmallImageDataset(val_dataset, 5)
+        small_train_dataset = SmallImageDataset(train_dataset, 1)
+        # small_val_dataset = SmallImageDataset(val_dataset, 1)
+        small_val_dataset = small_train_dataset  # TODO: This is only for testing
 
         train_dataloader = DataLoader(small_train_dataset,
                                       batch_size=params['num_envs'],
@@ -284,6 +299,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          reward_increase=params['reward_increase'],
                                          patch_size=params['patch_size'],
                                          masking_ratio=params['masking_ratio'],
+                                         mask_sample=params['mask_sample'],
                                          generator=torch_generator,
                                          )
 
@@ -307,6 +323,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Callbacks
         img_reconstruction_train_callback = ImgReconstructinoCallback(
             img_reconstruction_period=params['img_reconstruction_period'],
+            mask_sample=params['mask_sample'],
             mae_model=mae_model,
             act_mae_model=act_mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
@@ -320,6 +337,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         img_reconstruction_val_callback = ImgReconstructinoCallback(
             img_reconstruction_period=params['img_reconstruction_period'],
+            mask_sample=params['mask_sample'],
             mae_model=mae_model,
             act_mae_model=act_mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
