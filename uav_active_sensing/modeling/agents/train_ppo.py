@@ -38,9 +38,9 @@ PPO_PARAMS = {
     'n_steps': 48,
     'total_timesteps': 48 * 16 * 3 * int(10_000 / 16),
     'batch_size': 48 * 16,
-    'num_envs': 16,
+    'num_envs': 4,
     'n_epochs': 3,
-    'img_change_period': 48 * 16 * 3,
+    'img_change_period': 16,  # Change image every episode to provide greater generalization
     'clip_range': 0.2,
     'gamma': 0.99,
     'policy': 'MultiInputPolicy',
@@ -190,6 +190,12 @@ class ImgReconstructinoCallback(BaseCallback):
 
 class ImgChangeCallback(BaseCallback):
     def __init__(self, img_change_period: int, img_dataloader: DataLoader):
+        """Callback for updating the image of the exploration environment.
+
+        Args:
+            img_change_period (int): number of steps between env image update.
+            img_dataloader (DataLoader): Dataloader of the env images.
+        """
         super().__init__()
         self.img_change_period = img_change_period
         self.img_dataloader = img_dataloader
@@ -248,7 +254,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = SmallImageDataset(train_dataset, 20)
+        small_train_dataset = SmallImageDataset(train_dataset, 10)
         small_val_dataset = SmallImageDataset(val_dataset, 5)
 
         train_dataloader = DataLoader(small_train_dataset,
@@ -299,24 +305,33 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
 
         # Callbacks
-        img_reconstruction_callback = ImgReconstructinoCallback(
+        img_reconstruction_train_callback = ImgReconstructinoCallback(
             img_reconstruction_period=params['img_reconstruction_period'],
+            mae_model=mae_model,
             act_mae_model=act_mae_model,
             reconstruction_dir=train_img_reconstruction_dir,
+            deterministic=False,
         )
         img_change_train_callback = ImgChangeCallback(
             img_change_period=params['img_change_period'],
-            dataloader=train_dataloader,
+            img_dataloader=train_dataloader,
+        )
+        callback_list_train = CallbackList([img_reconstruction_train_callback, img_change_train_callback])
+
+        img_reconstruction_val_callback = ImgReconstructinoCallback(
+            img_reconstruction_period=params['img_reconstruction_period'],
+            mae_model=mae_model,
+            act_mae_model=act_mae_model,
+            reconstruction_dir=train_img_reconstruction_dir,
+            deterministic=True,
         )
         img_change_val_callback = ImgChangeCallback(
             img_change_period=params['img_change_period'],
-            dataloader=val_dataloader,
+            img_dataloader=val_dataloader,
         )
+        callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
 
-        callback_list_train = CallbackList([img_reconstruction_callback, img_change_train_callback])
-        callback_list_val = CallbackList([img_reconstruction_callback, img_change_val_callback])
-
-        # PPO agent
+        # PPO agent definition
         ppo_agent = PPO(
             params['policy'],
             vec_env,
@@ -334,6 +349,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(ppo_agent_logger)
 
+        # Training
         ppo_agent.learn(
             total_timesteps=params['total_timesteps'],
             callback=callback_list_train,
