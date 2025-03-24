@@ -340,19 +340,28 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         callback_list_train = CallbackList([img_reconstruction_train_callback, img_change_train_callback])
 
-        img_reconstruction_val_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=params['img_reconstruction_period'],
-            mask_sample=params['mask_sample'],
-            mae_model=mae_model,
-            act_mae_model=act_mae_model,
-            reconstruction_dir=train_img_reconstruction_dir,
-            deterministic=True,
-        )
-        img_change_val_callback = ImgChangeCallback(
-            img_change_period=params['img_change_period'],
-            img_dataloader=val_dataloader,
-        )
-        callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
+        # img_reconstruction_val_callback = ImgReconstructinoCallback(
+        #     img_reconstruction_period=params['img_reconstruction_period'],
+        #     mask_sample=params['mask_sample'],
+        #     mae_model=mae_model,
+        #     act_mae_model=act_mae_model,
+        #     reconstruction_dir=train_img_reconstruction_dir,
+        #     deterministic=True,
+        # )
+        # img_change_val_callback = ImgChangeCallback(
+        #     img_change_period=params['img_change_period'],
+        #     img_dataloader=val_dataloader,
+        # )
+        # callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
+
+        # TODO: Define eval callback (callable) for image reconstruction and image change
+        def eval_callback(local_vars: dict, global_vars: dict) -> None:
+            import pprint
+            print("\n--- Locals ---")
+            pprint.pprint(local_vars)  # Pretty-print local variables
+            print("\n--- Globals ---")
+            pprint.pprint(global_vars)  # Pretty-print global variables
+
 
         # PPO agent definition
         ppo_agent = PPO(
@@ -408,7 +417,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             n_eval_episodes=len(small_val_dataset),
             deterministic=True,
             return_episode_rewards=False,
-            callback=img_change_val_callback
+            callback=eval_callback
         )
 
         # TODO: Get some sampling examples
