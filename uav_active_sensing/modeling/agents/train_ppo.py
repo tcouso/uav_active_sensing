@@ -470,7 +470,7 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
         'policy': 'CnnPolicy',
         'vf_coef': 0.5,
         'device': DEVICE,
-        'seed': 64533,
+        'seed': 6453,
     }
 
     with mlflow.start_run():
