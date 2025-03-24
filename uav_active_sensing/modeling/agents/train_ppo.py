@@ -3,17 +3,17 @@ import random as rd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple, Callable
+from typing import Dict, Union, Any, Tuple, Callable, List
 
 import mlflow
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from transformers import AutoImageProcessor, ViTMAEForPreTraining
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -24,7 +24,6 @@ from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.modeling.agents.rl_agent_feature_extractor import CustomResNetFeatureExtractor
 from uav_active_sensing.config import DEVICE
 from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize_mae_reconstruction
-
 
 app = typer.Typer()
 
@@ -54,6 +53,31 @@ PPO_PARAMS = {
     'seed': 64553,
     'img_reconstruction_period': 10_000
 }
+
+
+def partition_dataset(dataset: Dataset, num_partitions: int) -> List[Subset]:
+    """
+    Partition a dataset into i equal-length subsets.
+
+    Args:
+        dataset (Dataset): The PyTorch dataset to partition.
+        num_partitions (int): Number of partitions (must divide the length of dataset).
+
+    Returns:
+        List[Subset]: A list of i Subset objects.
+    """
+    total_len = len(dataset)
+    assert total_len % num_partitions == 0, "i must be a divisor of the dataset length."
+    partition_size = total_len // num_partitions
+
+    subsets = []
+    for idx in range(num_partitions):
+        start_idx = idx * partition_size
+        end_idx = start_idx + partition_size
+        indices = list(range(start_idx, end_idx))
+        subsets.append(Subset(dataset, indices))
+
+    return subsets
 
 
 def run_episode_and_visualize_sampling(
@@ -102,24 +126,24 @@ def run_episode_and_visualize_sampling(
 
 
 class ImageEnvFactory:
-    def __init__(self, images: torch.Tensor,
+    def __init__(self,
                  log_dir: str,
-                 env_config: ImageExplorationEnvConfig):
-        self.images = images
+                 env_config: ImageExplorationEnvConfig
+                 ):
         self.log_dir = log_dir
         self.env_config = env_config
 
-    def __call__(self, env_idx: int) -> Callable:
+    def __call__(self, env_idx: int, dataset: Dataset) -> Callable:
         def _init():
             return Monitor(ImageExplorationEnv(
-                img=self.images[env_idx],
+                dataset=dataset,
                 seed=self.env_config.seed + env_idx,  # Different seeds for each env
                 env_config=self.env_config), self.log_dir
             )
         return _init
 
 
-class SmallImageDataset(Dataset):
+class ImageDatasetSample(Dataset):
     def __init__(self,
                  original_dataset: Dataset,
                  num_images: int):
@@ -208,69 +232,35 @@ class ImgReconstructinoCallback(BaseCallback):
         return True
 
 
-class ImgChangeCallback(BaseCallback):
-    def __init__(self, img_change_period: int, img_dataloader: DataLoader):
-        """Callback for updating the image of the exploration environment.
+# class ImgChangeCallback(BaseCallback):
+#     def __init__(self, img_change_period: int, img_dataloader: DataLoader):
+#         """Callback for updating the image of the exploration environment.
 
-        Args:
-            img_change_period (int): number of steps between env image update.
-            img_dataloader (DataLoader): Dataloader of the env images.
-        """
-        super().__init__()
-        self.img_change_period = img_change_period
-        self.img_dataloader = img_dataloader
-        self.img_iterator = iter(img_dataloader)
+#         Args:
+#             img_change_period (int): number of steps between env image update.
+#             img_dataloader (DataLoader): Dataloader of the env images.
+#         """
+#         super().__init__()
+#         self.img_change_period = img_change_period
+#         self.img_dataloader = img_dataloader
+#         self.img_iterator = iter(img_dataloader)
 
-    def _on_step(self) -> True:
-        if self.num_timesteps % self.img_change_period == 0:
-            try:
-                new_batch = next(self.img_iterator)
-            except StopIteration:
-                self.img_iterator = iter(self.img_dataloader)
-                new_batch = next(self.img_iterator)
+#     def _on_step(self) -> True:        # Commented out for debugging
 
-            vec_env = self.model.get_env()
+#         if self.num_timesteps % self.img_change_period == 0:
+#             try:
+#                 new_batch = next(self.img_iterator)
+#             except StopIteration:
+#                 self.img_iterator = iter(self.img_dataloader)
+#                 new_batch = next(self.img_iterator)
 
-            # Update each environment with its new image
-            for j in range(new_batch.shape[0]):
-                vec_env.env_method("set_img", new_batch[j], indices=j)
+#             vec_env = self.model.get_env()
 
-        return True
+#             # Update each environment with its new image
+#             for j in range(new_batch.shape[0]):
+#                 vec_env.env_method("set_img", new_batch[j], indices=j)
 
-# Evaluation callback
-class ImgChangeCallable:
-    def __init__(self, img_change_period: int, img_dataloader: DataLoader):
-        """
-        Args:
-            img_change_period (int): Number of steps between image updates.
-            img_dataloader (DataLoader): Dataloader for the environment images.
-        """
-        self.img_change_period = img_change_period
-        self.img_dataloader = img_dataloader
-        self.img_iterator = iter(img_dataloader)
-        self.step_counter = 0
-
-    def __call__(self, local_vars: Dict[str, Any], global_vars: Dict[str, Any]) -> None:
-        """
-        Called with the current locals and globals from the evaluation loop.
-        Updates the environment images every img_change_period steps.
-        """
-        _ = global_vars
-        self.step_counter += 1
-        if self.step_counter % self.img_change_period == 0:
-            try:
-                new_batch = next(self.img_iterator)
-            except StopIteration:
-                self.img_iterator = iter(self.img_dataloader)
-                new_batch = next(self.img_iterator)
-
-            # Expect the environment to be defined in globals as "env" and to be a vectorized env
-            vec_env = local_vars.get("env", None)
-            if vec_env is None:
-                raise ValueError("Environment ('env') not found in locals.")
-
-            for j in range(new_batch.shape[0]):
-                vec_env.env_method("set_img", new_batch[j], indices=j)
+#         return True
 
 
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
@@ -291,12 +281,12 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         artifact_dir = run_dir / "artifacts"
         models_dir = artifact_dir / "models"
         logs_dir = artifact_dir / "logs"
-        eval_img_reconstruction_dir = artifact_dir / "eval_img_reconstruction_dir"
+        val_img_reconstruction_dir = artifact_dir / "eval_img_reconstruction_dir"
         train_img_reconstruction_dir = artifact_dir / "train_img_reconstruction_dir"
 
         models_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
-        eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
+        val_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
         train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
         seed = params['seed'] if type(params['seed']) == int else params['seed'].item()
@@ -309,14 +299,14 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = SmallImageDataset(train_dataset, 20)
-        small_val_dataset = SmallImageDataset(val_dataset, 5)
+        small_train_dataset = ImageDatasetSample(train_dataset, 20)
+        small_val_dataset = ImageDatasetSample(val_dataset, 5)
 
-        train_dataloader = DataLoader(small_train_dataset,
-                                      batch_size=params['num_envs'],
-                                      collate_fn=tiny_imagenet_collate_fn,
-                                      generator=torch_generator,
-                                      shuffle=True)
+        # train_dataloader = DataLoader(small_train_dataset,
+        #                               batch_size=params['num_envs'],
+        #                               collate_fn=tiny_imagenet_collate_fn,
+        #                               generator=torch_generator,
+        #                               shuffle=True)
 
         val_dataloader = DataLoader(small_val_dataset,
                                     batch_size=params['num_envs'],
@@ -324,7 +314,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                     generator=torch_generator,
                                     shuffle=True)
 
-        # Pretrained model and reward function
+        # Training environment
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         mae_config.seed = seed
         mae_config.patch_size = params['patch_size']
@@ -344,7 +334,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          )
 
         # Take one image as a dummy input for env initialization
-        dummy_batch = next(iter(train_dataloader))
+        # dummy_batch = next(iter(train_dataloader))
         env_config = ImageExplorationEnvConfig(steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
                                                sensor_size=params['sensor_size'],
@@ -352,8 +342,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                                seed=seed
                                                )
 
-        factory = ImageEnvFactory(dummy_batch, log_dir=str(logs_dir), env_config=env_config)
-        vec_env = DummyVecEnv([factory(i) for i in range(params['num_envs'])])
+        factory = ImageEnvFactory(log_dir=str(logs_dir), env_config=env_config)
+        dataset_list = partition_dataset(small_train_dataset, params['num_envs'])
+        train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
+
+        # Validation environment
+        val_env = ImageExplorationEnv(small_val_dataset, params['seed'], env_config)
+
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(resnet_features_dim=512, pos_features_dim=64),
@@ -369,11 +364,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             reconstruction_dir=train_img_reconstruction_dir,
             deterministic=False,
         )
-        img_change_train_callback = ImgChangeCallback(
-            img_change_period=params['img_change_period'],
-            img_dataloader=train_dataloader,
-        )
-        callback_list_train = CallbackList([img_reconstruction_train_callback, img_change_train_callback])
+        # img_change_train_callback = ImgChangeCallback(
+        #     img_change_period=params['img_change_period'],
+        #     img_dataloader=train_dataloader,
+        # )
+        # callback_list_train = CallbackList([img_reconstruction_train_callback, img_change_train_callback])
 
         # img_reconstruction_val_callback = ImgReconstructinoCallback(
         #     img_reconstruction_period=params['img_reconstruction_period'],
@@ -389,11 +384,10 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # )
         # callback_list_val = CallbackList([img_reconstruction_val_callback, img_change_val_callback])
 
-
         # PPO agent definition
         ppo_agent = PPO(
             params['policy'],
-            vec_env,
+            train_vec_env,
             policy_kwargs=ppo_agent_policy_kwargs,
             device=params['device'],
             seed=seed,
@@ -408,14 +402,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(ppo_agent_logger)
 
-        # Commented out for debugging
-        # # Training
-        # ppo_agent.learn(
-        #     total_timesteps=params['total_timesteps'],
-        #     callback=callback_list_train,
-        # )
+        # Training
+        ppo_agent.learn(
+            total_timesteps=params['total_timesteps'],
+            callback=img_reconstruction_train_callback,
+        )
 
-        # ppo_agent.save(models_dir / "ppo_model.zip")
+        ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry
         model_uri = f"runs:/{run_id}/models"
@@ -440,17 +433,40 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         # Reward MAE evaluation
         mean_reward, std_reward = evaluate_policy(
             ppo_agent,
-            vec_env,
+            val_env,
             n_eval_episodes=len(small_val_dataset),
             deterministic=True,
             return_episode_rewards=False,
-            callback=ImgChangeCallable(16, val_dataloader)
         )
-
-        # TODO: Get some sampling examples
 
         mlflow.log_metric("eval/mean_reward", mean_reward)
         mlflow.log_metric("eval/std_reward", std_reward)
+
+        # img_reconstruction_period=params['img_reconstruction_period'],
+        #     mask_sample=params['mask_sample'],
+        #     mae_model=mae_model,
+        #     act_mae_model=act_mae_model,
+        #     reconstruction_dir=train_img_reconstruction_dir,
+        #     deterministic=True,
+
+        # TODO: Get some samples for visualization
+        for i in range(20):
+            run_episode_and_visualize_sampling(
+                agent=ppo_agent,
+                env=val_env,
+                deterministic=True,
+                act_mae_model=act_mae_model,
+                reconstruction_dir=val_img_reconstruction_dir,
+                mask_sample=params['mask_sample'],
+                filename="ppo_agent",
+                img_index=i,
+            )
+            visualize_mae_reconstruction(
+                val_env.img,
+                mae_model,
+                show=False,
+                save_path=val_img_reconstruction_dir / f"mae_reconstruction_img={i}"
+            )
 
         return {'loss': -mean_reward,
                 'loss_variance': -std_reward,
