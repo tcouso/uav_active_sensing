@@ -146,21 +146,28 @@ class ImageEnvFactory:
 class ImageDatasetSample(Dataset):
     def __init__(self,
                  original_dataset: Dataset,
-                 num_images: int):
+                 num_images: int,
+                 generator: torch.Generator,
+                 ):
         """
         Args:
             original_dataset (Dataset): The full dataset.
-            num_images (int): The number of images to use for testing.
+            num_images (int): The number of images to randomly sample.
+            generator (torch.Generator): Generator for reproducible randomness.
         """
         self.original_dataset = original_dataset
-        self.num_images = num_images  # Parametrized number of images
+        self.num_images = num_images
+
+        # Sample random indices from the original dataset
+        self.indices = torch.randperm(len(original_dataset), generator=generator)[:num_images]
 
     def __len__(self):
-        return self.num_images  # Return the number of images for testing
+        return self.num_images
 
     def __getitem__(self, idx):
-        # Get the image and label from the original dataset
-        img, label = self.original_dataset[idx]
+        # Access the original dataset using the randomly sampled indices
+        sampled_idx = self.indices[idx]
+        img, label = self.original_dataset[sampled_idx]
         return img, label
 
 
@@ -268,7 +275,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = ImageDatasetSample(train_dataset, 1)
+        small_train_dataset = ImageDatasetSample(train_dataset, num_images=1, generator=torch_generator)
         # small_val_dataset = ImageDatasetSample(val_dataset, 5)
         small_val_dataset = small_train_dataset  # Single image exp
 
