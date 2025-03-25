@@ -103,7 +103,7 @@ def run_episode_and_visualize_sampling(
         )
         obs, _, done, _, _ = env.step(actions)
 
-    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
+    masked_sampled_img = env.reward_function.sampled_img_random_masking(env.sampled_img)
 
     if mask_sample:
         visualize_act_mae_reconstruction(
@@ -396,7 +396,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         for i in range(20):
             run_episode_and_visualize_sampling(
                 agent=ppo_agent,
-                env=val_env,
+                env=val_env.env,
                 deterministic=True,
                 act_mae_model=act_mae_model,
                 reconstruction_dir=val_img_reconstruction_dir,
@@ -405,7 +405,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                 img_index=i,
             )
             visualize_mae_reconstruction(
-                val_env.img.unsqueeze(0),
+                val_env.env.img.unsqueeze(0),
                 mae_model,
                 show=False,
                 save_path=val_img_reconstruction_dir / f"mae_reconstruction_img={i}"
@@ -532,8 +532,8 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
 
         # Log the best parameters, loss, and model
         mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", best_run["loss"])
-        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
+        mlflow.log_metric("eval/mean_reward", -best_run["loss"])
+        mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
 
 if __name__ == "__main__":

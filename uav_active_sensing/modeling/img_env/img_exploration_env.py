@@ -161,7 +161,7 @@ class ImageExplorationEnv(gym.Env):
         self.max_steps = env_config.steps_until_termination
         self._step_count = 0
 
-        self._reward_function = env_config.reward_function
+        self.reward_function = env_config.reward_function
         self._interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Dict({
@@ -232,7 +232,7 @@ class ImageExplorationEnv(gym.Env):
             dtype=torch.int32
         )
         self._kernel_size = 1
-        self._reward_function.last_reward = 0
+        self.reward_function.last_reward = 0
         self._step_count = 0
 
         self._update_sampled_img()  # Initial env observation is without movement
@@ -247,7 +247,7 @@ class ImageExplorationEnv(gym.Env):
         observation = self._get_obs()
 
         if (self._step_count % self._interval_reward_assignment == 0) and (self._step_count > 0):
-            reward = self._reward_function(self.img, self.sampled_img)
+            reward = self.reward_function(self.img, self.sampled_img)
 
         else:
             reward = float(0)
