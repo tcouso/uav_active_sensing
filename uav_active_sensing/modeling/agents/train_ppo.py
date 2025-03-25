@@ -315,7 +315,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
 
         # Validation environment
-        val_env = ImageExplorationEnv(small_val_dataset, seed, env_config)
+        val_env = Monitor(ImageExplorationEnv(small_val_dataset, seed, env_config), str(logs_dir))
 
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
@@ -351,13 +351,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(ppo_agent_logger)
 
-        # Training
-        ppo_agent.learn(
-            total_timesteps=params['total_timesteps'],
-            callback=img_reconstruction_train_callback,
-        )
+        # # Training
+        # ppo_agent.learn(
+        #     total_timesteps=params['total_timesteps'],
+        #     callback=img_reconstruction_train_callback,
+        # )
 
-        ppo_agent.save(models_dir / "ppo_model.zip")
+        # ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry
         model_uri = f"runs:/{run_id}/models"
