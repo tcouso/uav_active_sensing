@@ -38,7 +38,7 @@ PPO_PARAMS = {
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 128,
-    'total_timesteps': 10_000_000,
+    'total_timesteps': 15_000_000,
     'batch_size': 16 * 20,
     'num_envs': 20,
     'n_epochs': 3,
@@ -276,11 +276,10 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = ImageDatasetSample(train_dataset, num_images=1_000, generator=torch_generator)
-        small_val_dataset = ImageDatasetSample(val_dataset, num_images=250, generator=torch_generator)
-        # small_val_dataset = small_train_dataset  # Single image exp
+        # train_dataset = ImageDatasetSample(train_dataset, num_images=1_000, generator=torch_generator)
+        # val_dataset = ImageDatasetSample(val_dataset, num_images=250, generator=torch_generator)
 
-        val_dataloader = DataLoader(small_val_dataset,
+        val_dataloader = DataLoader(val_dataset,
                                     batch_size=params['num_envs'],
                                     collate_fn=tiny_imagenet_collate_fn,
                                     generator=torch_generator,
@@ -311,11 +310,11 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                                seed=seed
                                                )
         factory = ImageEnvFactory(log_dir=str(logs_dir), env_config=env_config)
-        dataset_list = partition_dataset(small_train_dataset, params['num_envs'])
+        dataset_list = partition_dataset(train_dataset, params['num_envs'])
         train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
 
         # Validation environment
-        val_env = Monitor(ImageExplorationEnv(small_val_dataset, seed, env_config), str(logs_dir))
+        val_env = Monitor(ImageExplorationEnv(val_dataset, seed, env_config), str(logs_dir))
 
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
@@ -383,7 +382,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         mean_reward, std_reward = evaluate_policy(
             ppo_agent,
             val_env,
-            n_eval_episodes=len(small_val_dataset),
+            n_eval_episodes=len(val_dataset),
             deterministic=True,
             return_episode_rewards=False,
         )
