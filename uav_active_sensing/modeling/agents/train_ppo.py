@@ -351,13 +351,13 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         )
         ppo_agent.set_logger(ppo_agent_logger)
 
-        # # Training
-        # ppo_agent.learn(
-        #     total_timesteps=params['total_timesteps'],
-        #     callback=img_reconstruction_train_callback,
-        # )
+        # Training
+        ppo_agent.learn(
+            total_timesteps=params['total_timesteps'],
+            callback=img_reconstruction_train_callback,
+        )
 
-        # ppo_agent.save(models_dir / "ppo_model.zip")
+        ppo_agent.save(models_dir / "ppo_model.zip")
 
         # Register the model in MLflow Model Registry
         model_uri = f"runs:/{run_id}/models"
