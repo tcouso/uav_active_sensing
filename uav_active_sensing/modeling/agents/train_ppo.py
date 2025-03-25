@@ -33,14 +33,14 @@ PPO_PARAMS = {
     'num_samples': 1,
     'masking_ratio': 0.5,
     'reward_increase': False,
-    'mask_sample': True,
+    'mask_sample': False,
     'sensor_size': 3 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
     'n_steps': 2048,
-    'total_timesteps': 100_000,
-    'batch_size': 128 * 1,
-    'num_envs': 1,
+    'total_timesteps': 300_000,
+    'batch_size': 32 * 20,
+    'num_envs': 20,
     'n_epochs': 3,
     'img_change_period': 16,  # Change image every episode to provide greater generalization
     'clip_range': 0.2,
@@ -276,9 +276,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
         # Test with smaller datasets
-        small_train_dataset = ImageDatasetSample(train_dataset, num_images=1, generator=torch_generator)
-        # small_val_dataset = ImageDatasetSample(val_dataset, 5)
-        small_val_dataset = small_train_dataset  # Single image exp
+        small_train_dataset = ImageDatasetSample(train_dataset, num_images=20, generator=torch_generator)
+        small_val_dataset = ImageDatasetSample(val_dataset, 5)
+        # small_val_dataset = small_train_dataset  # Single image exp
 
         val_dataloader = DataLoader(small_val_dataset,
                                     batch_size=params['num_envs'],
