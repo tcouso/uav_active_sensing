@@ -277,7 +277,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Test with smaller datasets
         small_train_dataset = ImageDatasetSample(train_dataset, num_images=20, generator=torch_generator)
-        small_val_dataset = ImageDatasetSample(val_dataset, 5)
+        small_val_dataset = ImageDatasetSample(val_dataset, num_images=5, generator=torch_generator)
         # small_val_dataset = small_train_dataset  # Single image exp
 
         val_dataloader = DataLoader(small_val_dataset,
