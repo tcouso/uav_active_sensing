@@ -115,14 +115,19 @@ def run_episode_and_visualize_sampling(
             save_path=reconstruction_dir / f"{filename}_img={img_index}"
         )
     else:  # Sampled image is equal to masked image
-        visualize_act_mae_reconstruction(
-            env.img.unsqueeze(0),
-            env.sampled_img.unsqueeze(0),
-            env.sampled_img.unsqueeze(0),
-            act_mae_model,
-            show=False,
-            save_path=reconstruction_dir / f"{filename}_img={img_index}"
-        )
+        try:
+            visualize_act_mae_reconstruction(
+                env.img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                act_mae_model,
+                show=False,
+                save_path=reconstruction_dir / f"{filename}_img={img_index}"
+            )
+        except ValueError:
+            print(env.img.unsqueeze(0).shape)
+            print(env.sampled_img.unsqueeze(0).shape)
+            raise ValueError
 
 
 class ImageEnvFactory:
