@@ -8,8 +8,6 @@ from uav_active_sensing.config import IMAGENET_MEAN, IMAGENET_STD
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 
 # From: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/ViTMAE/ViT_MAE_visualization_demo.ipynb
-
-
 def show_image(image, title=""):
     # image is [H, W, 3]
     assert image.shape[2] == 3
@@ -53,11 +51,9 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     plt.subplot(1, 4, 4)
     show_image(im_paste[0], "reconstruction + visible")
 
-    # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
 
-    # Show the plot only if the flag is set
     if show:
         plt.show()
     else:

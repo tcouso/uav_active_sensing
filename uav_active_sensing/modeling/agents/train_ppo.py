@@ -1,5 +1,6 @@
 import typer
 import random as rd
+import traceback
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
@@ -105,24 +106,30 @@ def run_episode_and_visualize_sampling(
 
     masked_sampled_img = env.reward_function.sampled_img_random_masking(env.sampled_img)
 
-    if mask_sample:
-        visualize_act_mae_reconstruction(
-            env.img.unsqueeze(0),
-            env.sampled_img.unsqueeze(0),
-            masked_sampled_img.unsqueeze(0),
-            act_mae_model,
-            show=False,
-            save_path=reconstruction_dir / f"{filename}_img={img_index}"
-        )
-    else:  # Sampled image is equal to masked image
-        visualize_act_mae_reconstruction(
-            env.img.unsqueeze(0),
-            env.sampled_img.unsqueeze(0),
-            env.sampled_img.unsqueeze(0),
-            act_mae_model,
-            show=False,
-            save_path=reconstruction_dir / f"{filename}_img={img_index}"
-        )
+    try:
+
+        if mask_sample:
+            visualize_act_mae_reconstruction(
+                env.img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                masked_sampled_img.unsqueeze(0),
+                act_mae_model,
+                show=False,
+                save_path=reconstruction_dir / f"{filename}_img={img_index}"
+            )
+        else:  # Sampled image is equal to masked image
+            visualize_act_mae_reconstruction(
+                env.img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                act_mae_model,
+                show=False,
+                save_path=reconstruction_dir / f"{filename}_img={img_index}"
+            )
+    except Exception as err:
+        print("Unknown possible bug here")
+        print(err)
+        print(traceback.format_exc())
 
 
 class ImageEnvFactory:
