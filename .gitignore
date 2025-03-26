@@ -3,6 +3,7 @@
 /data/interim/*/
 /data/processed/*/
 /data/raw/*/
+*.db
 
 # Mac OS-specific storage files
 .DS_Store

@@ -11,7 +11,7 @@ from gymnasium import spaces
 
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
-from uav_active_sensing.pytorch_datasets import tiny_imagenet_single_img_collate_fn
+from uav_active_sensing.tiny_imagenet_utils import tiny_imagenet_single_img_collate_fn
 
 
 def make_kernel_size_odd(n: int) -> int:
