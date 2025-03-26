@@ -2,16 +2,12 @@ from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
 import typer
-from loguru import logger
-from tqdm import tqdm
 from transformers import ViTMAEForPreTraining
 
-from uav_active_sensing.config import FIGURES_DIR, PROCESSED_DATA_DIR, IMAGENET_MEAN, IMAGENET_STD
+from uav_active_sensing.config import IMAGENET_MEAN, IMAGENET_STD
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 
 # From: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/ViTMAE/ViT_MAE_visualization_demo.ipynb
-
-
 def show_image(image, title=""):
     # image is [H, W, 3]
     assert image.shape[2] == 3
@@ -55,11 +51,9 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     plt.subplot(1, 4, 4)
     show_image(im_paste[0], "reconstruction + visible")
 
-    # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
 
-    # Show the plot only if the flag is set
     if show:
         plt.show()
     else:
@@ -168,23 +162,3 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
 
 
 app = typer.Typer()
-
-
-@app.command()
-def main(
-    # ---- REPLACE DEFAULT PATHS AS APPROPRIATE ----
-    input_path: Path = PROCESSED_DATA_DIR / "dataset.csv",
-    output_path: Path = FIGURES_DIR / "plot.png",
-    # -----------------------------------------
-):
-    # ---- REPLACE THIS WITH YOUR OWN CODE ----
-    logger.info("Generating plot from data...")
-    for i in tqdm(range(10), total=10):
-        if i == 5:
-            logger.info("Something happened for iteration 5.")
-    logger.success("Plot generation complete.")
-    # -----------------------------------------
-
-
-if __name__ == "__main__":
-    app()

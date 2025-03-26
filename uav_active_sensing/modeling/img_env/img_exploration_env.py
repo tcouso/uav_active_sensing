@@ -4,13 +4,14 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
+
 import gymnasium as gym
 from gymnasium import spaces
 
 from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
 from uav_active_sensing.config import DEVICE
-
-# TODO: Remove batch size logic
+from uav_active_sensing.pytorch_datasets import tiny_imagenet_single_img_collate_fn
 
 
 def make_kernel_size_odd(n: int) -> int:
@@ -28,13 +29,16 @@ class RewardFunction:
                  patch_size: int,
                  masking_ratio: float,
                  generator: torch.Generator,
-                 reward_increase: bool):
+                 reward_increase: bool,
+                 mask_sample: bool,
+                 ):
         self.model = model
         self.num_samples = num_samples
         self.masking_ratio = masking_ratio
         self.generator = generator
         self.patch_size = patch_size
         self.reward_increase = reward_increase
+        self.mask_sample = mask_sample
         self.last_reward = 0
 
     def __call__(self, img: torch.Tensor, sampled_img: torch.Tensor) -> float:
@@ -42,11 +46,16 @@ class RewardFunction:
         rewards = torch.zeros(self.num_samples, dtype=torch.float32)
 
         for i in range(self.num_samples):
-            masked_sampled_img = self.sampled_img_random_masking(sampled_img)
+            if self.mask_sample:
+                masked_img = self.sampled_img_random_masking(sampled_img)
+            else:
+                masked_img = sampled_img
+
             with torch.no_grad():
                 outputs = self.model(
                     img.unsqueeze(0),
-                    masked_sampled_img.unsqueeze(0))
+                    masked_img.unsqueeze(0)
+                )
             loss = outputs.loss
             reward_i = 1 / (1 + loss)
             rewards[i] = reward_i
@@ -107,13 +116,19 @@ class ImageExplorationEnvConfig:
 
 class ImageExplorationEnv(gym.Env):
 
-    def __init__(self, img: torch.Tensor, env_config: ImageExplorationEnvConfig) -> None:
+    def __init__(self, dataset: Dataset, seed: int, env_config: ImageExplorationEnvConfig) -> None:
         super().__init__()
-        assert len(img.shape) == 3, "Image needs to be a 3-d tensor"
-        self.device = env_config.device
-        self.seed = env_config.seed
-        self.generator = torch.Generator().manual_seed(self.seed)
-        self.img = img
+        self.device: ImageExplorationEnvConfig = env_config.device
+        self.seed: int = seed
+        self.generator = torch.Generator().manual_seed(seed)
+        self.dataset: Dataset = dataset
+        self.dataloader: DataLoader = DataLoader(dataset,
+                                                 collate_fn=tiny_imagenet_single_img_collate_fn,
+                                                 generator=self.generator,
+                                                 shuffle=True,
+                                                 )
+        self.iterator = iter(self.dataloader)
+        self.img: torch.Tensor = next(iter(self.dataloader))
         self.img_h, self.img_w = self.img.shape[1:]
 
         if env_config.img_sensor_ratio is not None:
@@ -146,7 +161,7 @@ class ImageExplorationEnv(gym.Env):
         self.max_steps = env_config.steps_until_termination
         self._step_count = 0
 
-        self._reward_function = env_config.reward_function
+        self.reward_function = env_config.reward_function
         self._interval_reward_assignment = env_config.interval_reward_assignment
 
         self.observation_space = spaces.Dict({
@@ -182,7 +197,7 @@ class ImageExplorationEnv(gym.Env):
 
         obs = {
             'sampled_img': sampled_img,
-            'pos': np.expand_dims(pos, axis=0) 
+            'pos': pos
         }
 
         return obs
@@ -196,6 +211,15 @@ class ImageExplorationEnv(gym.Env):
         if seed != None:
             super().reset(seed=seed, options=options)
 
+        try:
+            new_img = next(self.iterator)
+        except StopIteration:
+            self.iterator = iter(self.dataloader)
+            new_img = next(self.iterator)
+
+
+        self.img = new_img
+
         self.__sensor_pos = torch.stack([
             torch.randint(0, self.num_sensors_per_img_h, (1, ), dtype=torch.int32, generator=self.generator) * self.sensor_h,
             torch.randint(0, self.num_sensors_per_img_w, (1, ), dtype=torch.int32, generator=self.generator) * self.sensor_w,
@@ -208,7 +232,7 @@ class ImageExplorationEnv(gym.Env):
             dtype=torch.int32
         )
         self._kernel_size = 1
-        self._reward_function.last_reward = 0
+        self.reward_function.last_reward = 0
         self._step_count = 0
 
         self._update_sampled_img()  # Initial env observation is without movement
@@ -223,7 +247,7 @@ class ImageExplorationEnv(gym.Env):
         observation = self._get_obs()
 
         if (self._step_count % self._interval_reward_assignment == 0) and (self._step_count > 0):
-            reward = self._reward_function(self.img, self.sampled_img)
+            reward = self.reward_function(self.img, self.sampled_img)
 
         else:
             reward = float(0)

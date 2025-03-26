@@ -1,19 +1,23 @@
 import typer
 import random as rd
+import traceback
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
 from pathlib import Path
 import sys
-from typing import Dict, Union, Any, Tuple, Optional
+from typing import Dict, Union, Any, Tuple, Callable, List
+
 import mlflow
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from transformers import AutoImageProcessor, ViTMAEForPreTraining
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.logger import HumanOutputFormat, KVWriter, Logger
-from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.evaluation import evaluate_policy
 
 from uav_active_sensing.pytorch_datasets import TinyImageNetDataset, tiny_imagenet_collate_fn
 from uav_active_sensing.modeling.img_env.img_exploration_env import RewardFunction, ImageExplorationEnv, ImageExplorationEnvConfig
@@ -30,13 +34,16 @@ PPO_PARAMS = {
     'num_samples': 1,
     'masking_ratio': 0.5,
     'reward_increase': False,
-    'sensor_size': 3 * 16,
+    'mask_sample': False,
+    'sensor_size': 2 * 16,
     'patch_size': 16,
     'learning_rate': 1e-4,
-    'n_steps': 2048,
-    'total_timesteps': 80_000,
-    'batch_size': 128,
-    'n_epochs': 10,
+    'n_steps': 128,
+    'total_timesteps': 15_000_000,
+    'batch_size': 16 * 20,
+    'num_envs': 20,
+    'n_epochs': 3,
+    'img_change_period': 16,  # Change image every episode to provide greater generalization
     'clip_range': 0.2,
     'gamma': 0.99,
     'policy': 'MultiInputPolicy',
@@ -45,77 +52,44 @@ PPO_PARAMS = {
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 64553,
+    'img_reconstruction_period': 200_000
 }
 
 
-class RandomAgent(BaseAlgorithm):
-    def __init__(self, env: ImageExplorationEnv):
-        super().__init__(policy=None, env=env, learning_rate=0)
-        self.action_space = env.action_space
-
-    def predict(self,
-                observation: Union[np.ndarray, dict[str, np.ndarray]],
-                state: Optional[tuple[np.ndarray, ...]] = None,
-                episode_start: Optional[np.ndarray] = None,
-                deterministic: bool = False):
-
-        _, _, _, _ = observation, state, episode_start, deterministic
-        action = [self.action_space.sample()]
-
-        return action, None
-
-    def learn(self, *args, **kwargs):  # Dummy learn method
-
-        pass
-
-    def _setup_model(self):
-        pass
-
-
-class SingleImageDataset(Dataset):
-    def __init__(self, original_dataset: Dataset, index: int):
-        self.image, self.label = original_dataset[index]
-
-    def __len__(self):
-        return 1
-
-    def __getitem__(self, idx):
-        return self.image, self.label
-
-
-class MLflowOutputFormat(KVWriter):
+def partition_dataset(dataset: Dataset, num_partitions: int) -> List[Subset]:
     """
-    Dumps key/value pairs into MLflow's numeric format.
+    Partition a dataset into i equal-length subsets.
+
+    Args:
+        dataset (Dataset): The PyTorch dataset to partition.
+        num_partitions (int): Number of partitions (must divide the length of dataset).
+
+    Returns:
+        List[Subset]: A list of i Subset objects.
     """
+    total_len = len(dataset)
+    assert total_len % num_partitions == 0, "i must be a divisor of the dataset length."
+    partition_size = total_len // num_partitions
 
-    def write(
-        self,
-        key_values: Dict[str, Any],
-        key_excluded: Dict[str, Union[str, Tuple[str, ...]]],
-        step: int = 0,
-    ) -> None:
+    subsets = []
+    for idx in range(num_partitions):
+        start_idx = idx * partition_size
+        end_idx = start_idx + partition_size
+        indices = list(range(start_idx, end_idx))
+        subsets.append(Subset(dataset, indices))
 
-        for (key, value), (_, excluded) in zip(
-            sorted(key_values.items()), sorted(key_excluded.items())
-        ):
-
-            if excluded is not None and "mlflow" in excluded:
-                continue
-
-            if isinstance(value, np.ScalarType):
-                if not isinstance(value, str):
-                    mlflow.log_metric(key, value, step)
+    return subsets
 
 
 def run_episode_and_visualize_sampling(
-    agent,
+    agent: PPO,
     env: ImageExplorationEnv,
     deterministic: bool,
+    mask_sample: bool,
     act_mae_model: ActViTMAEForPreTraining,
     reconstruction_dir: Path,
     filename: str,
     img_index: int,
-    mae_model: ViTMAEForPreTraining = None,
 ):
     """
     Runs one episode with the given agent and environment, then visualizes the reconstructions.
@@ -130,64 +104,158 @@ def run_episode_and_visualize_sampling(
         )
         obs, _, done, _, _ = env.step(actions)
 
-    masked_sampled_img = env._reward_function.sampled_img_random_masking(env.sampled_img)
-    visualize_act_mae_reconstruction(
-        env.img.unsqueeze(0),
-        env.sampled_img.unsqueeze(0),
-        masked_sampled_img.unsqueeze(0),
-        act_mae_model,
-        show=False,
-        save_path=reconstruction_dir / f"{filename}_img={img_index}"
-    )
+    masked_sampled_img = env.reward_function.sampled_img_random_masking(env.sampled_img)
 
-    if mae_model is not None:
-        visualize_mae_reconstruction(
-            env.img.unsqueeze(0),
-            mae_model,
-            show=False,
-            save_path=reconstruction_dir / f"mae_reconstruction_img={img_index}"
-        )
+    try:
+
+        if mask_sample:
+            visualize_act_mae_reconstruction(
+                env.img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                masked_sampled_img.unsqueeze(0),
+                act_mae_model,
+                show=False,
+                save_path=reconstruction_dir / f"{filename}_img={img_index}"
+            )
+        else:  # Sampled image is equal to masked image
+            visualize_act_mae_reconstruction(
+                env.img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                env.sampled_img.unsqueeze(0),
+                act_mae_model,
+                show=False,
+                save_path=reconstruction_dir / f"{filename}_img={img_index}"
+            )
+    except Exception as err:
+        print("Unknown possible bug here")
+        print(err)
+        print(traceback.format_exc())
 
 
+class ImageEnvFactory:
+    def __init__(self,
+                 log_dir: str,
+                 env_config: ImageExplorationEnvConfig
+                 ):
+        self.log_dir = log_dir
+        self.env_config = env_config
+
+    def __call__(self, env_idx: int, dataset: Dataset) -> Callable:
+        def _init():
+            return Monitor(ImageExplorationEnv(
+                dataset=dataset,
+                seed=self.env_config.seed + env_idx,  # Different seeds for each env
+                env_config=self.env_config), self.log_dir
+            )
+        return _init
+
+
+class ImageDatasetSample(Dataset):
+    def __init__(self,
+                 original_dataset: Dataset,
+                 num_images: int,
+                 generator: torch.Generator,
+                 ):
+        """
+        Args:
+            original_dataset (Dataset): The full dataset.
+            num_images (int): The number of images to randomly sample.
+            generator (torch.Generator): Generator for reproducible randomness.
+        """
+        self.original_dataset = original_dataset
+        self.num_images = num_images
+
+        # Sample random indices from the original dataset
+        self.indices = torch.randperm(len(original_dataset), generator=generator)[:num_images]
+
+    def __len__(self):
+        return self.num_images
+
+    def __getitem__(self, idx):
+        # Access the original dataset using the randomly sampled indices
+        sampled_idx = self.indices[idx]
+        img, label = self.original_dataset[sampled_idx]
+
+        return img, label
+
+
+class MLflowOutputFormat(KVWriter):
+    """
+    Dumps key/value pairs into MLflow's numeric format.
+    """
+
+    def write(
+        self,
+        key_values: Dict[str, Any],
+        key_excluded: Dict[str, Union[str, Tuple[str, ...]]],
+        step: int = 0,
+    ) -> None:
+        for (key, value), (_, excluded) in zip(
+            sorted(key_values.items()), sorted(key_excluded.items())
+        ):
+
+            if excluded is not None and "mlflow" in excluded:
+                continue
+
+            if isinstance(value, np.ScalarType):
+                if not isinstance(value, str):
+                    mlflow.log_metric(key, value, step)
+
+
+# Training callbacks
 class ImgReconstructinoCallback(BaseCallback):
-    def __init__(self, img_reconstruction_period: int,
-                 env: ImageExplorationEnv,
-                 act_mae_model: ActViTMAEForPreTraining,
+    def __init__(self,
+                 img_reconstruction_period: int,
                  mae_model: ViTMAEForPreTraining,
+                 act_mae_model: ActViTMAEForPreTraining,
                  reconstruction_dir: Path,
-                 deterministic: bool = False):
+                 deterministic: bool = False,
+                 mask_sample: bool = False,
+                 ):
 
         super().__init__()
         self.img_reconstruction_period: int = img_reconstruction_period
-        self.env = env
-        self.act_mae_model = act_mae_model
         self.mae_model = mae_model
+        self.act_mae_model = act_mae_model
         self.reconstruction_dir = reconstruction_dir
         self.deterministic = deterministic
+        self.mask_sample = mask_sample
 
     def _on_step(self) -> True:
         if self.num_timesteps % self.img_reconstruction_period == 0:
+            vec_env = self.model.get_env()
+            selected_idx = rd.randint(0, vec_env.num_envs - 1)
+            sample_env = vec_env.envs[selected_idx].env
 
             run_episode_and_visualize_sampling(
                 agent=self.model,
-                env=self.env,
+                env=sample_env,
                 deterministic=self.deterministic,
                 act_mae_model=self.act_mae_model,
                 reconstruction_dir=self.reconstruction_dir,
+                mask_sample=self.mask_sample,
                 filename="ppo_agent",
                 img_index=self.num_timesteps,
+            )
+            visualize_mae_reconstruction(
+                sample_env.img.unsqueeze(0),
+                self.mae_model,
+                show=False,
+                save_path=self.reconstruction_dir / f"mae_reconstruction_img={self.num_timesteps}"
             )
 
         return True
 
 
 def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -> dict:
+
     if experiment_name is not None:
         mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(nested=nested):
+
+        # Experiment setup
         mlflow.transformers.autolog(disable=True)
-        # mlflow.sklearn.autolog(disable=True)
         mlflow.autolog()
 
         run_id = mlflow.active_run().info.run_id
@@ -197,32 +265,34 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         artifact_dir = run_dir / "artifacts"
         models_dir = artifact_dir / "models"
         logs_dir = artifact_dir / "logs"
-        eval_img_reconstruction_dir = artifact_dir / "eval_img_reconstruction_dir"
+        val_img_reconstruction_dir = artifact_dir / "eval_img_reconstruction_dir"
         train_img_reconstruction_dir = artifact_dir / "train_img_reconstruction_dir"
 
         models_dir.mkdir(parents=True, exist_ok=True)
         logs_dir.mkdir(parents=True, exist_ok=True)
-        eval_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
+        val_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
         train_img_reconstruction_dir.mkdir(parents=True, exist_ok=True)
 
         seed = params['seed'] if type(params['seed']) == int else params['seed'].item()
+        mlflow.log_params(params)
+
+        # Data
         torch_generator = torch.Generator().manual_seed(seed)
         image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base", use_fast=True)
-        tiny_imagenet_train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
+        train_dataset = TinyImageNetDataset(split="train", transform=image_processor)
+        val_dataset = TinyImageNetDataset(split="val", transform=image_processor)
 
-        # Single image experiment
-        rd.seed(seed)
-        random_index = rd.randint(0, len(tiny_imagenet_train_dataset) - 1)
-        single_image_dataset = SingleImageDataset(tiny_imagenet_train_dataset, random_index)
+        # Test with smaller datasets
+        # train_dataset = ImageDatasetSample(train_dataset, num_images=1_000, generator=torch_generator)
+        # val_dataset = ImageDatasetSample(val_dataset, num_images=250, generator=torch_generator)
 
-        # Use worker_init_fn if loading data in multiprocessing settings: https://pytorch.org/docs/stable/notes/randomness.html#dataloader
-        dataloader = DataLoader(single_image_dataset,
-                                batch_size=1,
-                                collate_fn=tiny_imagenet_collate_fn,
-                                generator=torch_generator,
-                                shuffle=True)
+        val_dataloader = DataLoader(val_dataset,
+                                    batch_size=params['num_envs'],
+                                    collate_fn=tiny_imagenet_collate_fn,
+                                    generator=torch_generator,
+                                    shuffle=True)
 
-        # Pretrained model and reward function
+        # Training environment
         mae_config = ViTMAEForPreTraining.config_class.from_pretrained("facebook/vit-mae-base")
         mae_config.seed = seed
         mae_config.patch_size = params['patch_size']
@@ -237,37 +307,42 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
                                          reward_increase=params['reward_increase'],
                                          patch_size=params['patch_size'],
                                          masking_ratio=params['masking_ratio'],
+                                         mask_sample=params['mask_sample'],
                                          generator=torch_generator,
                                          )
-
-        # Take one image as a dummy input for env initialization
-        dummy_batch = next(iter(dataloader))
         env_config = ImageExplorationEnvConfig(steps_until_termination=params['steps_until_termination'],
                                                interval_reward_assignment=params['interval_reward_assignment'],
                                                sensor_size=params['sensor_size'],
                                                reward_function=reward_function,
                                                seed=seed
                                                )
+        factory = ImageEnvFactory(log_dir=str(logs_dir), env_config=env_config)
+        dataset_list = partition_dataset(train_dataset, params['num_envs'])
+        train_vec_env = DummyVecEnv([factory(i, dataset=dataset_list[i]) for i in range(params['num_envs'])])
 
-        env = ImageExplorationEnv(dummy_batch[0], env_config)
+        # Validation environment
+        val_env = Monitor(ImageExplorationEnv(val_dataset, seed, env_config), str(logs_dir))
+
         ppo_agent_policy_kwargs = dict(
             features_extractor_class=CustomResNetFeatureExtractor,
             features_extractor_kwargs=dict(resnet_features_dim=512, pos_features_dim=64),
             normalize_images=False
         )
-        img_reconstruction_callback = ImgReconstructinoCallback(
-            img_reconstruction_period=2_500,
-            env=env,
-            act_mae_model=act_mae_model,
-            mae_model=mae_model,
-            reconstruction_dir=train_img_reconstruction_dir,
-        )
-        mlflow.log_params(params)
 
-        # PPO agent
+        # Callbacks
+        img_reconstruction_train_callback = ImgReconstructinoCallback(
+            img_reconstruction_period=params['img_reconstruction_period'],
+            mask_sample=params['mask_sample'],
+            mae_model=mae_model,
+            act_mae_model=act_mae_model,
+            reconstruction_dir=train_img_reconstruction_dir,
+            deterministic=False,
+        )
+
+        # PPO agent definition
         ppo_agent = PPO(
             params['policy'],
-            env,
+            train_vec_env,
             policy_kwargs=ppo_agent_policy_kwargs,
             device=params['device'],
             seed=seed,
@@ -281,23 +356,12 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
             output_formats=[HumanOutputFormat(sys.stdout), MLflowOutputFormat()],
         )
         ppo_agent.set_logger(ppo_agent_logger)
-        ppo_vec_env = ppo_agent.get_env()
 
-        # Random agent
-        rd_agent = RandomAgent(env)
-
-        for i, batch in enumerate(dataloader):
-            # MAE reward as reference
-            with torch.no_grad():
-                outputs = mae_model(batch)
-            loss = outputs.loss
-            mae_reward = 1 / (1 + loss)
-
-            mlflow.log_metric("train/mae_reward", mae_reward)
-
-            # Agent training
-            ppo_vec_env.env_method("set_img", batch[0])  # TODO: Vectorize this for full batch training
-            ppo_agent.learn(total_timesteps=params['total_timesteps'], progress_bar=False, log_interval=1, callback=img_reconstruction_callback)
+        # Training
+        ppo_agent.learn(
+            total_timesteps=params['total_timesteps'],
+            callback=img_reconstruction_train_callback,
+        )
 
         ppo_agent.save(models_dir / "ppo_model.zip")
 
@@ -305,66 +369,53 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
         model_uri = f"runs:/{run_id}/models"
         mlflow.register_model(model_uri, name=f"SB3_PPO_Model_{experiment_id}_{run_id}")
 
-        # Model evaluation
-        for i, batch in enumerate(dataloader):  # TODO: Change this to eval dataloader
-            ppo_vec_env.env_method("set_img", batch[0])
-
-            # MAE reward
+        # Regular MAE evaluation
+        sum_loss = 0
+        sum_reward = 0
+        num_val_batches = len(val_dataloader)
+        for batch in val_dataloader:
             with torch.no_grad():
                 outputs = mae_model(batch)
             loss = outputs.loss
-            mae_reward = 1 / (1 + loss)
+            reward = 1 / (1 + loss)
 
-            mlflow.log_metric("eval/mae_reward", mae_reward)
+            sum_loss += loss
+            sum_reward += reward
 
-            # Trained agent
-            mean_reward, std_reward = evaluate_policy(
-                ppo_agent,
-                ppo_vec_env,
-                n_eval_episodes=5,
+        mlflow.log_metric("eval/mae_loss", sum_loss / num_val_batches)
+        mlflow.log_metric("eval/mae_reward", sum_reward / num_val_batches)
+
+        # Reward MAE evaluation
+        mean_reward, std_reward = evaluate_policy(
+            ppo_agent,
+            val_env,
+            n_eval_episodes=len(val_dataset),
+            deterministic=True,
+            return_episode_rewards=False,
+        )
+
+        mlflow.log_metric("eval/mean_reward", mean_reward)
+        mlflow.log_metric("eval/std_reward", std_reward)
+
+        # Trained agent sampling visualization
+        val_env.reset()
+        for i in range(20):
+            run_episode_and_visualize_sampling(
+                agent=ppo_agent,
+                env=val_env.env,
                 deterministic=True,
-                return_episode_rewards=False
+                act_mae_model=act_mae_model,
+                reconstruction_dir=val_img_reconstruction_dir,
+                mask_sample=params['mask_sample'],
+                filename="ppo_agent",
+                img_index=i,
             )
-
-            # Random agent
-            rd_mean_reward, rd_std_reward = evaluate_policy(
-                rd_agent,
-                ppo_vec_env,
-                n_eval_episodes=5,
-                deterministic=False,
-                return_episode_rewards=False
+            visualize_mae_reconstruction(
+                val_env.env.img.unsqueeze(0),
+                mae_model,
+                show=False,
+                save_path=val_img_reconstruction_dir / f"mae_reconstruction_img={i}"
             )
-
-            mlflow.log_metric("eval/mean_reward", mean_reward)
-            mlflow.log_metric("eval/std_reward", std_reward)
-
-            mlflow.log_metric("eval/rd_mean_reward", rd_mean_reward)
-            mlflow.log_metric("eval/rd_std_reward", rd_std_reward)
-
-            # Example episodes visualization
-            for j in range(10):
-
-                run_episode_and_visualize_sampling(
-                    ppo_agent,
-                    env,
-                    deterministic=True,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    filename=f"ppo_agent_trial={j}",
-                    reconstruction_dir=eval_img_reconstruction_dir,
-                    img_index=i,
-                )
-
-                run_episode_and_visualize_sampling(
-                    rd_agent,
-                    env,
-                    deterministic=True,
-                    act_mae_model=act_mae_model,
-                    mae_model=mae_model,
-                    filename=f"rd_agent_trial={j}",
-                    reconstruction_dir=eval_img_reconstruction_dir,
-                    img_index=i,
-                )
 
         return {'loss': -mean_reward,
                 'loss_variance': -std_reward,
@@ -405,8 +456,44 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
 
         # Log the best parameters, loss, and model
         mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", best_run["loss"])
-        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
+        mlflow.log_metric("eval/mean_reward", -best_run["loss"])
+        mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
+
+
+@app.command()
+def ppo_fixed_params_seed_iter_dual(experiment_name: str) -> None:
+    mlflow.set_experiment(experiment_name)
+    mlflow.set_tracking_uri("http://localhost:5000")
+
+    base_param_space = PPO_PARAMS.copy()
+    base_param_space['seed'] = hp.randint('seed', 100_000)
+
+    variants = [
+        {"mask_sample": True},
+        {"mask_sample": False},
+    ]
+
+    for variant in variants:
+        param_space = base_param_space.copy()
+        param_space.update(variant)
+
+        with mlflow.start_run(run_name=f"mask_sample_{variant['mask_sample']}"):
+            trials = Trials()
+            best = fmin(
+                fn=objective,
+                space=param_space,
+                algo=tpe.suggest,
+                max_evals=40,
+                trials=trials,
+            )
+
+            # Fetch the details of the best run
+            best_run = sorted(trials.results, key=lambda x: x["loss"])[0]
+
+            # Log variant-specific parameters, loss, and metrics
+            mlflow.log_params({**best, "mask_sample": variant["mask_sample"]})
+            mlflow.log_metric("eval/mean_reward", -best_run["loss"])
+            mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
 
 @app.command()
@@ -414,26 +501,26 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
     mlflow.set_experiment(experiment_name)
     mlflow.set_tracking_uri("http://localhost:5000")
     param_space = {
-        'steps_until_termination': 25,
+        'steps_until_termination': 16,
         'reward_increase': False,
         'num_samples': 1,
         'masking_ratio': 0.5,
         'sensor_size': 32,
         'patch_size': 16,
-        'interval_reward_assignment': 25,
+        'interval_reward_assignment': 16,
         'learning_rate': hp.loguniform('learning_rate', np.log(1e-5), np.log(1e-3)),
-        'n_steps': 512,
-        'total_timesteps': 50_000,
+        'n_steps': 2048,
+        'total_timesteps': 80_000,
         'batch_size': hp.choice('batch_size', [64, 128]),
-        'n_epochs': hp.choice('n_epochs', [3, 5]),
-        'clip_range': hp.uniform('clip_range', 0.2, 0.4),  # More room for policy updates
+        'n_epochs': 10,
+        'clip_range': hp.uniform('clip_range', 0.2, 0.4),
         'gamma': 0.99,
-        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),  # Reduce reliance on value function
-        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),  # Encourage exploration
+        'gae_lambda': hp.uniform('gae_lambda', 0.8, 0.95),
+        'ent_coef': hp.uniform('ent_coef', 0.01, 0.1),
         'policy': 'CnnPolicy',
         'vf_coef': 0.5,
         'device': DEVICE,
-        'seed': hp.choice('seed', [64553, 23421, 43214, 53245]),
+        'seed': 6453,
     }
 
     with mlflow.start_run():
@@ -451,8 +538,8 @@ def ppo_hiperparameter_search(experiment_name: str) -> None:
 
         # Log the best parameters, loss, and model
         mlflow.log_params(best)
-        mlflow.log_metric("eval/mean_reward", best_run["loss"])
-        mlflow.log_metric("eval/std_reward", best_run["loss_variance"])
+        mlflow.log_metric("eval/mean_reward", -best_run["loss"])
+        mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
 
 if __name__ == "__main__":

@@ -11,17 +11,19 @@ from uav_active_sensing.config import DEVICE, EXTERNAL_DATA_DIR
 
 # Tiny imagenet
 
+
 def tiny_imagenet_collate_fn(batch):
-    processed_batch = [image[0]["pixel_values"].to(DEVICE) for image in batch]
+    processed_batch = [img[0]["pixel_values"].to(DEVICE) for img in batch]
 
     return torch.cat(processed_batch, dim=0)
 
 
-# def tiny_imagenet_collate_fn(batch):
+def tiny_imagenet_single_img_collate_fn(batch):
+    processed_batch = [img[0]["pixel_values"].to(DEVICE) for img in batch]
+    img = processed_batch[0].squeeze(0)
+    assert len(img.shape) == 3, "Expect batch size of 1"
 
-#     processed_batch = [image.to(DEVICE) for (image, _) in batch]
-
-#     return torch.stack(processed_batch)
+    return img
 
 
 class TinyImageNetDataset(Dataset):
