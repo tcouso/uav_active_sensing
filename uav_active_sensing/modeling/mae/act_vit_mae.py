@@ -46,7 +46,6 @@ from uav_active_sensing.modeling.mae.act_vit_mae_config import ActViTMAEPretrain
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "ActViTMAEConfig"
-_CHECKPOINT_FOR_DOC = "facebook/vit-mae-base"
 
 
 @dataclass
@@ -275,7 +274,7 @@ class ActViTMAEEmbeddings(nn.Module):
 
     def nan_masking(self, sequence):
         """
-        Masks patches that contain NaN values in a deterministic way.
+        Masks patches that contain NaN values in a deterministic way. This is the core of the custom logic introduced to regular ViTMAE.
 
         Args:
             sequence (`torch.FloatTensor` of shape `(batch_size, sequence_length, dim)`) :
@@ -317,7 +316,7 @@ class ActViTMAEEmbeddings(nn.Module):
         return sequence_unmasked, mask, ids_restore
 
     def forward(self, pixel_values, interpolate_pos_encoding: bool = False):
-        batch_size, num_channels, height, width = pixel_values.shape
+        _, _, height, width = pixel_values.shape
         embeddings = self.patch_embeddings(
             pixel_values, interpolate_pos_encoding=interpolate_pos_encoding
         )
@@ -372,7 +371,7 @@ class ActViTMAEPatchEmbeddings(nn.Module):
         )
 
     def forward(self, pixel_values, interpolate_pos_encoding: bool = False):
-        batch_size, num_channels, height, width = pixel_values.shape
+        _, num_channels, height, width = pixel_values.shape
         if num_channels != self.num_channels:
             raise ValueError(
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
@@ -738,7 +737,7 @@ class ActViTMAEPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
 
 
-VIT_MAE_START_DOCSTRING = r"""
+ACT_VIT_MAE_START_DOCSTRING = r"""
     This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
     as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage and
     behavior.
@@ -749,7 +748,7 @@ VIT_MAE_START_DOCSTRING = r"""
             configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
 """
 
-VIT_MAE_INPUTS_DOCSTRING = r"""
+ACT_VIT_MAE_INPUTS_DOCSTRING = r"""
     Args:
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
             Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See [`ViTImageProcessor.__call__`]
@@ -777,7 +776,7 @@ VIT_MAE_INPUTS_DOCSTRING = r"""
 
 @add_start_docstrings(
     "The bare ActViTMAE Model transformer outputting raw hidden-states without any specific head on top.",
-    VIT_MAE_START_DOCSTRING,
+    ACT_VIT_MAE_START_DOCSTRING,
 )
 class ActViTMAEModel(ActViTMAEPreTrainedModel):
     def __init__(self, config):
@@ -803,7 +802,7 @@ class ActViTMAEModel(ActViTMAEPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
-    @add_start_docstrings_to_model_forward(VIT_MAE_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(ACT_VIT_MAE_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=ActViTMAEModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
@@ -814,26 +813,7 @@ class ActViTMAEModel(ActViTMAEPreTrainedModel):
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, ActViTMAEModelOutput]:
-        r"""
-        Returns:
 
-        Examples:
-
-        ```python
-        >>> from transformers import AutoImageProcessor, ActViTMAEModel
-        >>> from PIL import Image
-        >>> import requests
-
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
-
-        >>> image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base")
-        >>> model = ActViTMAEModel.from_pretrained("facebook/vit-mae-base")
-
-        >>> inputs = image_processor(images=image, return_tensors="pt")
-        >>> outputs = model(**inputs)
-        >>> last_hidden_states = outputs.last_hidden_state
-        ```"""
         output_attentions = (
             output_attentions if output_attentions is not None else self.config.output_attentions
         )
@@ -1031,16 +1011,8 @@ class ActViTMAEDecoder(nn.Module):
 
 @add_start_docstrings(
     """The ActViTMAE Model transformer with the decoder on top for self-supervised pre-training.
-
-    <Tip>
-
-    Note that we provide a script to pre-train this model on custom data in our [examples
-    directory](https://github.com/huggingface/transformers/tree/main/examples/pytorch/image-pretraining).
-
-    </Tip>
-
     """,
-    VIT_MAE_START_DOCSTRING,
+    ACT_VIT_MAE_START_DOCSTRING,
 )
 class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
     def __init__(self, config):
@@ -1177,7 +1149,7 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         return loss
 
-    @add_start_docstrings_to_model_forward(VIT_MAE_INPUTS_DOCSTRING)
+    @add_start_docstrings_to_model_forward(ACT_VIT_MAE_INPUTS_DOCSTRING)
     @replace_return_docstrings(
         output_type=ActViTMAEForPreTrainingOutput, config_class=_CONFIG_FOR_DOC
     )
@@ -1191,28 +1163,6 @@ class ActViTMAEForPreTraining(ActViTMAEPreTrainedModel):
         return_dict: Optional[bool] = None,
         interpolate_pos_encoding: bool = False,
     ) -> Union[Tuple, ActViTMAEForPreTrainingOutput]:
-        r"""
-        Returns:
-
-        Examples:
-
-        ```python
-        >>> from transformers import AutoImageProcessor, ViTMAEForPreTraining
-        >>> from PIL import Image
-        >>> import requests
-
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
-
-        >>> image_processor = AutoImageProcessor.from_pretrained("facebook/vit-mae-base")
-        >>> model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base")
-
-        >>> inputs = image_processor(images=image, return_tensors="pt")
-        >>> outputs = model(**inputs)
-        >>> loss = outputs.loss
-        >>> mask = outputs.mask
-        >>> ids_restore = outputs.ids_restore
-        ```"""
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 

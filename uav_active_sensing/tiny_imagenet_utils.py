@@ -1,12 +1,13 @@
-from pathlib import Path
 import os
-import torch
 import requests
 import zipfile
-from torch.utils.data import Dataset
+from pathlib import Path
 from tqdm import tqdm
 from PIL import Image
 from loguru import logger
+
+import torch
+from torch.utils.data import Dataset
 
 from uav_active_sensing.config import DEVICE, EXTERNAL_DATA_DIR, TINY_IMAGENET_URL
 
@@ -78,7 +79,6 @@ class TinyImageNetDataset(Dataset):
                     self.data.append(self.root_dir / "images" / img_file)
                     self.labels.append(class_label)
 
-        # Map labels to indices
         unique_labels = sorted(set(self.labels))
         self.label_to_idx = {label: idx for idx, label in enumerate(unique_labels)}
         self.labels = [self.label_to_idx[label] for label in self.labels]

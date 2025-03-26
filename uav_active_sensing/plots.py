@@ -1,7 +1,6 @@
-from pathlib import Path
 import torch
 import matplotlib.pyplot as plt
-import typer
+from pathlib import Path
 from transformers import ViTMAEForPreTraining
 
 from uav_active_sensing.config import IMAGENET_MEAN, IMAGENET_STD
@@ -22,7 +21,6 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     y = model.unpatchify(outputs.logits)
     y = torch.einsum('nchw->nhwc', y).detach().cpu()
 
-    # visualize the mask
     mask = outputs.mask.detach()
     mask = mask.unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)  # (N, H*W, p*p*3)
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
@@ -30,13 +28,13 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
 
     x = torch.einsum('nchw->nhwc', pixel_values).detach().cpu()
 
-    # masked image
+    # Masked image
     im_masked = x * (1 - mask)
 
     # MAE reconstruction pasted with visible patches
     im_paste = x * (1 - mask) + y * mask
 
-    # make the plt figure larger
+    # Make the plt figure larger
     plt.rcParams['figure.figsize'] = [24, 24]
 
     plt.subplot(1, 4, 1)
@@ -68,12 +66,12 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
                                      show: bool = True
                                      ):
 
-    # forward pass
+    # Forward pass
     outputs = model(pixel_values, masked_sampled_pixel_values)
     y = model.unpatchify(outputs.logits)
     y = torch.einsum("nchw->nhwc", y).detach().cpu()
 
-    # visualize the mask
+    # Visualize the mask
     mask = outputs.mask.detach()
     mask = mask.unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)  # (N, H*W, p*p*3)
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
@@ -81,16 +79,16 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
 
     x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
 
-    # sampled image
+    # Sampled image
     im_sampled = torch.nan_to_num(sampled_pixel_values.detach().cpu().permute(0, 2, 3, 1))
 
-    # masked image
+    # Masked image
     im_masked = x * (1 - mask)
 
     # MAE reconstruction pasted with visible patches
     im_paste = x * (1 - mask) + y * mask
 
-    # make the plt figure larger
+    # Make the plt figure larger
     plt.rcParams["figure.figsize"] = [24, 24]
 
     plt.subplot(1, 5, 1)
@@ -108,15 +106,13 @@ def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
     plt.subplot(1, 5, 5)
     show_image(im_paste[0], "reconstruction + visible")
 
-    # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
 
-    # Show the plot only if the flag is set
     if show:
         plt.show()
     else:
-        plt.close()  # Close to free memory when not displaying
+        plt.close()
 
 
 def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = True):
@@ -128,11 +124,9 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
         tensor (torch.Tensor): The tensor to display. Shape can be (B, C, H, W), (C, H, W), or (H, W).
         batch_idx (int, optional): The batch index to visualize. Defaults to 0.
     """
-    # Ensure tensor is at least 2D
     if tensor.dim() < 2:
         raise ValueError("Tensor must be at least 2D.")
 
-    # Handle batch dimension
     if tensor.dim() == 4:  # Batch dimension present (B, C, H, W)
         tensor = tensor[batch_idx]  # Select the specified batch index
     elif tensor.dim() == 3:  # No batch dimension (C, H, W)
@@ -140,25 +134,18 @@ def visualize_tensor(tensor, batch_idx=0, save_path: Path = None, show: bool = T
     else:  # 2D tensor (H, W)
         pass  # Use as is
 
-    # If tensor is 3D, check if it represents RGB or grayscale
     if tensor.dim() == 3 and tensor.shape[0] in {3, 1}:  # RGB or grayscale
         tensor = tensor.permute(1, 2, 0)  # Convert (C, H, W) to (H, W, C)
 
-    # Plot the tensor as an image
     plt.figure(figsize=(6, 6))
     plt.imshow(tensor.cpu().numpy())
     plt.title(f"Tensor (Batch {batch_idx})" if tensor.dim() == 4 else "Tensor")
     plt.axis("off")  # Hide axis
 
-    # Save the plot if a path is provided
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
 
-    # Show the plot only if the flag is set
     if show:
         plt.show()
     else:
-        plt.close()  # Close to free memory when not displaying
-
-
-app = typer.Typer()
+        plt.close()

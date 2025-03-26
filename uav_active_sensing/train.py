@@ -177,7 +177,7 @@ class ImageEnvFactory:
         def _init():
             return Monitor(ImageExplorationEnv(
                 dataset=dataset,
-                seed=self.env_config.seed + env_idx,  # Different seeds for each env
+                seed=self.env_config.seed + env_idx,
                 env_config=self.env_config), self.log_dir
             )
         return _init
