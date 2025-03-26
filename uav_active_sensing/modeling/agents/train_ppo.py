@@ -51,7 +51,7 @@ PPO_PARAMS = {
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 64553,
-    'img_reconstruction_period': 10_000
+    'img_reconstruction_period': 200_000
 }
 
 
@@ -115,19 +115,14 @@ def run_episode_and_visualize_sampling(
             save_path=reconstruction_dir / f"{filename}_img={img_index}"
         )
     else:  # Sampled image is equal to masked image
-        try:
-            visualize_act_mae_reconstruction(
-                env.img.unsqueeze(0),
-                env.sampled_img.unsqueeze(0),
-                env.sampled_img.unsqueeze(0),
-                act_mae_model,
-                show=False,
-                save_path=reconstruction_dir / f"{filename}_img={img_index}"
-            )
-        except ValueError:
-            print(env.img.unsqueeze(0).shape)
-            print(env.sampled_img.unsqueeze(0).shape)
-            raise ValueError
+        visualize_act_mae_reconstruction(
+            env.img.unsqueeze(0),
+            env.sampled_img.unsqueeze(0),
+            env.sampled_img.unsqueeze(0),
+            act_mae_model,
+            show=False,
+            save_path=reconstruction_dir / f"{filename}_img={img_index}"
+        )
 
 
 class ImageEnvFactory:
