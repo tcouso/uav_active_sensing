@@ -51,7 +51,7 @@ PPO_PARAMS = {
     'vf_coef': 0.5,
     'device': DEVICE,
     'seed': 64553,
-    'img_reconstruction_period': 200_000
+    'img_reconstruction_period': 10_000
 }
 
 
