@@ -203,7 +203,7 @@ class MLflowOutputFormat(KVWriter):
 
 
 # Training callbacks
-class ImgReconstructinoCallback(BaseCallback):https://www.reddit.com/r/LaTeX/comments/18s5x5l/compile_time_overleaf_exceeded_for_free_plans_i/?rdt=59139
+class ImgReconstructinoCallback(BaseCallback):
     def __init__(self,
                  img_reconstruction_period: int,
                  mae_model: ViTMAEForPreTraining,
