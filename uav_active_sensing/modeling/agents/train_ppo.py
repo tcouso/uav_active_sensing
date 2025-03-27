@@ -37,9 +37,9 @@ PPO_PARAMS = {
     'mask_sample': False,
     'sensor_size': 2 * 16,
     'patch_size': 16,
-    'learning_rate': 1e-4,
+    'learning_rate': lambda f: 2.5e-4 * f,
     'n_steps': 128,
-    'total_timesteps': 15_000_000,
+    'total_timesteps': 5_000_000,
     'batch_size': 16 * 20,
     'num_envs': 20,
     'n_epochs': 3,
@@ -203,7 +203,7 @@ class MLflowOutputFormat(KVWriter):
 
 
 # Training callbacks
-class ImgReconstructinoCallback(BaseCallback):
+class ImgReconstructinoCallback(BaseCallback):https://www.reddit.com/r/LaTeX/comments/18s5x5l/compile_time_overleaf_exceeded_for_free_plans_i/?rdt=59139
     def __init__(self,
                  img_reconstruction_period: int,
                  mae_model: ViTMAEForPreTraining,
