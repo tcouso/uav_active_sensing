@@ -420,7 +420,7 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # Trained agent sampling visualization
         val_env.reset()
-        for i in range(20):
+        for i in range(30):
             run_episode_and_visualize_sampling(
                 agent=ppo_agent,
                 env=val_env.env,
@@ -468,7 +468,7 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
             fn=objective,
             space=seed_iter_param_space,
             algo=tpe.suggest,
-            max_evals=5,
+            max_evals=3,
             trials=trials,
         )
 
@@ -479,42 +479,6 @@ def ppo_fixed_params_seed_iter(experiment_name: str) -> None:
         mlflow.log_params(best)
         mlflow.log_metric("eval/mean_reward", -best_run["loss"])
         mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
-
-
-@app.command()
-def ppo_fixed_params_seed_iter_dual(experiment_name: str) -> None:
-    mlflow.set_experiment(experiment_name)
-    mlflow.set_tracking_uri("http://localhost:5000")
-
-    base_param_space = PPO_PARAMS.copy()
-    base_param_space['seed'] = hp.randint('seed', 100_000)
-
-    variants = [
-        {"mask_sample": True},
-        {"mask_sample": False},
-    ]
-
-    for variant in variants:
-        param_space = base_param_space.copy()
-        param_space.update(variant)
-
-        with mlflow.start_run(run_name=f"mask_sample_{variant['mask_sample']}"):
-            trials = Trials()
-            best = fmin(
-                fn=objective,
-                space=param_space,
-                algo=tpe.suggest,
-                max_evals=40,
-                trials=trials,
-            )
-
-            # Fetch the details of the best run
-            best_run = sorted(trials.results, key=lambda x: x["loss"])[0]
-
-            # Log variant-specific parameters, loss, and metrics
-            mlflow.log_params({**best, "mask_sample": variant["mask_sample"]})
-            mlflow.log_metric("eval/mean_reward", -best_run["loss"])
-            mlflow.log_metric("eval/std_reward", -best_run["loss_variance"])
 
 
 @app.command()
