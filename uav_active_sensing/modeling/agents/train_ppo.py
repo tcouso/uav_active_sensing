@@ -28,6 +28,8 @@ from uav_active_sensing.plots import visualize_act_mae_reconstruction, visualize
 
 app = typer.Typer()
 
+
+
 PPO_PARAMS = {
     'steps_until_termination': 16,
     'interval_reward_assignment': 16,
@@ -37,7 +39,7 @@ PPO_PARAMS = {
     'mask_sample': False,
     'sensor_size': 2 * 16,
     'patch_size': 16,
-    'learning_rate': lambda f: 2.5e-4 * f,
+    'learning_rate': 1e-4,
     'n_steps': 128,
     'total_timesteps': 5_000_000,
     'batch_size': 16 * 20,
@@ -55,6 +57,24 @@ PPO_PARAMS = {
     'img_reconstruction_period': 200_000
 }
 
+def linear_schedule(initial_value: float) -> Callable[[float], float]:
+    """
+    Linear learning rate schedule.
+
+    :param initial_value: Initial learning rate.
+    :return: schedule that computes
+      current learning rate depending on remaining progress
+    """
+    def func(progress_remaining: float) -> float:
+        """
+        Progress will decrease from 1 (beginning) to 0.
+
+        :param progress_remaining:
+        :return: current learning rate
+        """
+        return progress_remaining * initial_value
+
+    return func
 
 def partition_dataset(dataset: Dataset, num_partitions: int) -> List[Subset]:
     """
@@ -341,8 +361,9 @@ def train_ppo(params: dict, experiment_name: str = None, nested: bool = False) -
 
         # PPO agent definition
         ppo_agent = PPO(
-            params['policy'],
-            train_vec_env,
+            policy=params['policy'],
+            env=train_vec_env,
+            learning_rate=linear_schedule(params['learning_rate']),
             policy_kwargs=ppo_agent_policy_kwargs,
             device=params['device'],
             seed=seed,
