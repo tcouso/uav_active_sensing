@@ -39,7 +39,7 @@ PPO_PARAMS = {
     'mask_sample': False,
     'sensor_size': 2 * 16,
     'patch_size': 16,
-    'learning_rate': 1e-4,
+    'learning_rate': 0.0003,
     'n_steps': 128,
     'total_timesteps': 5_000_000,
     'batch_size': 16 * 20,
