@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from torchvision.transforms import functional as F
 from PIL import Image
 
-from uav_active_sensing.config import DEVICE, EXTERNAL_DATA_DIR
+from uav_active_sensing.config import DEVICE, DATA_DIR
 
 # Tiny imagenet
 
@@ -27,7 +27,9 @@ def tiny_imagenet_single_img_collate_fn(batch):
 
 
 class TinyImageNetDataset(Dataset):
-    def __init__(self, root_dir=EXTERNAL_DATA_DIR / "tiny-imagenet-200", split=None, transform=None):
+    def __init__(
+        self, root_dir=DATA_DIR / "tiny-imagenet-200", split=None, transform=None
+    ):
         """
         Args:
             root_dir (Path or str): Root directory of the dataset (tiny-imagenet-200).

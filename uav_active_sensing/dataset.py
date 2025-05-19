@@ -7,8 +7,8 @@ import zipfile
 from torchvision import datasets
 
 from uav_active_sensing.config import TINY_IMAGENET_URL, EXTERNAL_DATA_DIR
-app = typer.Typer()
 
+app = typer.Typer()
 
 
 def download_and_extract_tiny_imagenet(target_dir: Path):

@@ -5,7 +5,8 @@ import typer
 from transformers import ViTMAEForPreTraining
 
 from uav_active_sensing.config import IMAGENET_MEAN, IMAGENET_STD
-from uav_active_sensing.modeling.mae.act_vit_mae import ActViTMAEForPreTraining
+from uav_active_sensing.mae.act_vit_mae import ActViTMAEForPreTraining
+
 
 # From: https://github.com/NielsRogge/Transformers-Tutorials/blob/master/ViTMAE/ViT_MAE_visualization_demo.ipynb
 def show_image(image, title=""):
@@ -17,18 +18,23 @@ def show_image(image, title=""):
     return
 
 
-def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPreTraining, save_path: Path = None, show: bool = True):
+def visualize_mae_reconstruction(
+    pixel_values: torch.Tensor,
+    model: ViTMAEForPreTraining,
+    save_path: Path = None,
+    show: bool = True,
+):
     outputs = model(pixel_values)
     y = model.unpatchify(outputs.logits)
-    y = torch.einsum('nchw->nhwc', y).detach().cpu()
+    y = torch.einsum("nchw->nhwc", y).detach().cpu()
 
     # visualize the mask
     mask = outputs.mask.detach()
     mask = mask.unsqueeze(-1).repeat(1, 1, model.config.patch_size**2 * 3)  # (N, H*W, p*p*3)
     mask = model.unpatchify(mask)  # 1 is removing, 0 is keeping
-    mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
+    mask = torch.einsum("nchw->nhwc", mask).detach().cpu()
 
-    x = torch.einsum('nchw->nhwc', pixel_values).detach().cpu()
+    x = torch.einsum("nchw->nhwc", pixel_values).detach().cpu()
 
     # masked image
     im_masked = x * (1 - mask)
@@ -37,7 +43,7 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
     im_paste = x * (1 - mask) + y * mask
 
     # make the plt figure larger
-    plt.rcParams['figure.figsize'] = [24, 24]
+    plt.rcParams["figure.figsize"] = [24, 24]
 
     plt.subplot(1, 4, 1)
     show_image(x[0], "original")
@@ -60,13 +66,14 @@ def visualize_mae_reconstruction(pixel_values: torch.Tensor, model: ViTMAEForPre
         plt.close()  # Close to free memory when not displaying
 
 
-def visualize_act_mae_reconstruction(pixel_values: torch.Tensor,
-                                     sampled_pixel_values: torch.Tensor,
-                                     masked_sampled_pixel_values: torch.Tensor,
-                                     model: ActViTMAEForPreTraining,
-                                     save_path: Path = None,
-                                     show: bool = True
-                                     ):
+def visualize_act_mae_reconstruction(
+    pixel_values: torch.Tensor,
+    sampled_pixel_values: torch.Tensor,
+    masked_sampled_pixel_values: torch.Tensor,
+    model: ActViTMAEForPreTraining,
+    save_path: Path = None,
+    show: bool = True,
+):
 
     # forward pass
     outputs = model(pixel_values, masked_sampled_pixel_values)
