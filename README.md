@@ -6,6 +6,19 @@
 
 nstruction with a SSL reward model
 
+This project was set in the context of using reinforcement learning for controlling unmanned aerial vehicles (UAVs). Specifically, we need to learn a policy that allows UAVs to scan a farmland territory in order to locate certain undesirable weeds. The problem encompasses:
+    - A set of N UAVs with downward pointing cameras that gives them a field of view of the surface.
+    - UAVs can move in three dimensions. Moving up increases the field of view span, but reduces resolution.
+    - While moving, UAVs collect views of the terrain, collectively constructing a sample of the territory.
+
+We aim to train a sampling policy that allows UAVs to explore the image regions that contain the greater amount of novelty, since visiting those sections could be useful for exploration dependent tasks, such as detecting strange weeds or other relevant elements.
+   - We assume that the amount of novelty in an image section can be measured with **reconstruction accuracy**. That is, if a section of an image can be used to accurately reconstruct the full image, then that section is dense in information.
+   - Full image reconstruction from partial images can be done with pre-trained visual models.
+
+In this implementation we use pre-trained **Masked Auto-Encoders (MAEs)** [https://arxiv.org/abs/2111.06377] as image reconstruction devices.
+    - UAVs take samples of a territory during their trajectories. The samples then are fed to MAE to reconstruct the entire territory.
+    - The global reward is proportional to the inverse of the MSE between the generated and the target map, so agents learn to maximize reconstruction accuracy.
+
 ## Project Organization
 
 ```
